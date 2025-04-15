@@ -1,0 +1,452 @@
+[
+  {
+    "zip_code": "02532",
+    "population": 13180,
+    "density": 956.22
+  },
+  {
+    "zip_code": "02536",
+    "population": 21100,
+    "density": 771.24
+  },
+  {
+    "zip_code": "02723",
+    "population": 17111,
+    "density": 10732.64
+  },
+  {
+    "zip_code": "02762",
+    "population": 9872,
+    "density": 898.7
+  },
+  {
+    "zip_code": "02840",
+    "population": 23615,
+    "density": 3245.6
+  },
+  {
+    "zip_code": "03246",
+    "population": 17006,
+    "density": 856.22
+  },
+  {
+    "zip_code": "06418",
+    "population": 12150,
+    "density": 2407.25
+  },
+  {
+    "zip_code": "06710",
+    "population": 9669,
+    "density": 9981.35
+  },
+  {
+    "zip_code": "08009",
+    "population": 14967,
+    "density": 905.44
+  },
+  {
+    "zip_code": "08723",
+    "population": 32033,
+    "density": 2679.02
+  },
+  {
+    "zip_code": "08724",
+    "population": 41573,
+    "density": 3012.18
+  },
+  {
+    "zip_code": "11040",
+    "population": 42344,
+    "density": 8807.25
+  },
+  {
+    "zip_code": "11743",
+    "population": 42423,
+    "density": 1653.37
+  },
+  {
+    "zip_code": "11768",
+    "population": 21908,
+    "density": 1451.3
+  },
+  {
+    "zip_code": "11772",
+    "population": 45006,
+    "density": 2790.41
+  },
+  {
+    "zip_code": "13669",
+    "population": 15615,
+    "density": 153.89
+  },
+  {
+    "zip_code": "14760",
+    "population": 17272,
+    "density": 265.54
+  },
+  {
+    "zip_code": "15108",
+    "population": 42782,
+    "density": 1082.64
+  },
+  {
+    "zip_code": "15146",
+    "population": 28422,
+    "density": 1448.96
+  },
+  {
+    "zip_code": "15234",
+    "population": 14330,
+    "density": 4604.4
+  },
+  {
+    "zip_code": "15235",
+    "population": 33811,
+    "density": 2283.16
+  },
+  {
+    "zip_code": "15401",
+    "population": 30230,
+    "density": 545.85
+  },
+  {
+    "zip_code": "15650",
+    "population": 27367,
+    "density": 369.17
+  },
+  {
+    "zip_code": "15714",
+    "population": 5215,
+    "density": 156.48
+  },
+  {
+    "zip_code": "15902",
+    "population": 11593,
+    "density": 1232.64
+  },
+  {
+    "zip_code": "15954",
+    "population": 2186,
+    "density": 108.03
+  },
+  {
+    "zip_code": "16001",
+    "population": 39733,
+    "density": 524.09
+  },
+  {
+    "zip_code": "16201",
+    "population": 16734,
+    "density": 149.22
+  },
+  {
+    "zip_code": "16801",
+    "population": 42153,
+    "density": 1356.99
+  },
+  {
+    "zip_code": "23235",
+    "population": 33207,
+    "density": 1866.06
+  },
+  {
+    "zip_code": "26003",
+    "population": 40445,
+    "density": 444.04
+  },
+  {
+    "zip_code": "26070",
+    "population": 7951,
+    "density": 198.96
+  },
+  {
+    "zip_code": "27909",
+    "population": 40878,
+    "density": 180.31
+  },
+  {
+    "zip_code": "30046",
+    "population": 39524,
+    "density": 2497.67
+  },
+  {
+    "zip_code": "30060",
+    "population": 39313,
+    "density": 2536.27
+  },
+  {
+    "zip_code": "30083",
+    "population": 62941,
+    "density": 3525.65
+  },
+  {
+    "zip_code": "30132",
+    "population": 50803,
+    "density": 496.11
+  },
+  {
+    "zip_code": "30144",
+    "population": 58389,
+    "density": 2639.38
+  },
+  {
+    "zip_code": "30341",
+    "population": 34812,
+    "density": 3483.16
+  },
+  {
+    "zip_code": "30518",
+    "population": 56309,
+    "density": 1406.99
+  },
+  {
+    "zip_code": "30529",
+    "population": 12138,
+    "density": 240.41
+  },
+  {
+    "zip_code": "31520",
+    "population": 22743,
+    "density": 1129.27
+  },
+  {
+    "zip_code": "32084",
+    "population": 36998,
+    "density": 820.21
+  },
+  {
+    "zip_code": "32136",
+    "population": 8303,
+    "density": 468.39
+  },
+  {
+    "zip_code": "32250",
+    "population": 28738,
+    "density": 3209.84
+  },
+  {
+    "zip_code": "32257",
+    "population": 41791,
+    "density": 3411.92
+  },
+  {
+    "zip_code": "32501",
+    "population": 10721,
+    "density": 2908.29
+  },
+  {
+    "zip_code": "32703",
+    "population": 57603,
+    "density": 1794.3
+  },
+  {
+    "zip_code": "32935",
+    "population": 41533,
+    "density": 3161.14
+  },
+  {
+    "zip_code": "32967",
+    "population": 26219,
+    "density": 656.48
+  },
+  {
+    "zip_code": "33060",
+    "population": 35888,
+    "density": 5162.69
+  },
+  {
+    "zip_code": "33311",
+    "population": 73280,
+    "density": 7067.88
+  },
+  {
+    "zip_code": "33455",
+    "population": 20980,
+    "density": 370.98
+  },
+  {
+    "zip_code": "33458",
+    "population": 55969,
+    "density": 2750.26
+  },
+  {
+    "zip_code": "33570",
+    "population": 33676,
+    "density": 805.44
+  },
+  {
+    "zip_code": "33612",
+    "population": 49899,
+    "density": 5019.17
+  },
+  {
+    "zip_code": "33713",
+    "population": 31835,
+    "density": 4872.02
+  },
+  {
+    "zip_code": "33765",
+    "population": 14364,
+    "density": 3439.9
+  },
+  {
+    "zip_code": "33948",
+    "population": 18732,
+    "density": 1444.82
+  },
+  {
+    "zip_code": "33990",
+    "population": 35428,
+    "density": 3791.19
+  },
+  {
+    "zip_code": "34112",
+    "population": 25946,
+    "density": 1748.45
+  },
+  {
+    "zip_code": "34134",
+    "population": 16403,
+    "density": 1220.73
+  },
+  {
+    "zip_code": "34205",
+    "population": 30607,
+    "density": 4741.19
+  },
+  {
+    "zip_code": "34231",
+    "population": 32203,
+    "density": 3409.33
+  },
+  {
+    "zip_code": "34606",
+    "population": 28155,
+    "density": 2434.2
+  },
+  {
+    "zip_code": "34668",
+    "population": 48025,
+    "density": 3096.11
+  },
+  {
+    "zip_code": "34711",
+    "population": 69727,
+    "density": 1780.83
+  },
+  {
+    "zip_code": "35630",
+    "population": 33697,
+    "density": 1333.42
+  },
+  {
+    "zip_code": "35810",
+    "population": 32705,
+    "density": 1162.18
+  },
+  {
+    "zip_code": "40218",
+    "population": 33292,
+    "density": 3700.26
+  },
+  {
+    "zip_code": "40219",
+    "population": 39107,
+    "density": 2632.64
+  },
+  {
+    "zip_code": "40223",
+    "population": 23264,
+    "density": 1930.31
+  },
+  {
+    "zip_code": "40601",
+    "population": 51627,
+    "density": 237.31
+  },
+  {
+    "zip_code": "41076",
+    "population": 17145,
+    "density": 894.56
+  },
+  {
+    "zip_code": "42002",
+    "population": null,
+    "density": null
+  },
+  {
+    "zip_code": "42351",
+    "population": 4580,
+    "density": 64.77
+  },
+  {
+    "zip_code": "42701",
+    "population": 53240,
+    "density": 329.02
+  },
+  {
+    "zip_code": "42718",
+    "population": 26461,
+    "density": 99.74
+  },
+  {
+    "zip_code": "43055",
+    "population": 62697,
+    "density": 556.48
+  },
+  {
+    "zip_code": "43130",
+    "population": 62450,
+    "density": 379.79
+  },
+  {
+    "zip_code": "43213",
+    "population": 35912,
+    "density": 3479.53
+  },
+  {
+    "zip_code": "43613",
+    "population": 30597,
+    "density": 4996.37
+  },
+  {
+    "zip_code": "43713",
+    "population": 6511,
+    "density": 71.76
+  },
+  {
+    "zip_code": "44256",
+    "population": 64606,
+    "density": 494.04
+  },
+  {
+    "zip_code": "44483",
+    "population": 25602,
+    "density": 1396.63
+  },
+  {
+    "zip_code": "44512",
+    "population": 33018,
+    "density": 1940.93
+  },
+  {
+    "zip_code": "45040",
+    "population": 58132,
+    "density": 2043.78
+  },
+  {
+    "zip_code": "45150",
+    "population": 33342,
+    "density": 1033.68
+  },
+  {
+    "zip_code": "45230",
+    "population": 26923,
+    "density": 1959.84
+  },
+  {
+    "zip_code": "45232",
+    "population": 7257,
+    "density": 1797.67
+  }
+]
