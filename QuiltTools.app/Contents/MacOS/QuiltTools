@@ -1,0 +1,106 @@
+#!/bin/bash
+
+# Quilt DataTools Launcher Application
+# This script starts the Quilt DataTools server and opens it in the default browser
+
+# Configuration
+PROJECT_DIR="/Users/ukaoma/Documents/GitHub/firecrawl-webcrawler"
+PORT=3000
+URL="http://localhost:$PORT"
+
+# Create a temporary log file
+LOGFILE=$(mktemp -t quilttools)
+
+# Function to log messages
+log() {
+    echo "$(date): $1" | tee -a "$LOGFILE"
+}
+
+# Function to display dialog
+show_dialog() {
+    osascript -e "display dialog \"$1\" buttons {\"OK\"} default button \"OK\" with title \"Quilt DataTools\""
+}
+
+# Hard-code node path for macOS with Homebrew (common installation)
+DEFAULT_NODE_PATH="/opt/homebrew/bin/node"
+
+# Function to clean up when app is terminated
+cleanup() {
+    log "Shutting down server (PID: $SERVER_PID)..."
+    kill $SERVER_PID 2>/dev/null
+    log "Server shutdown complete."
+    exit 0
+}
+
+# Set trap for cleanup
+trap cleanup EXIT INT TERM
+
+# Display startup message
+log "Starting Quilt DataTools..."
+log "Project directory: $PROJECT_DIR"
+log "Server will be available at: $URL"
+
+# Change to the project directory
+if [ ! -d "$PROJECT_DIR" ]; then
+    log "Error: Project directory not found: $PROJECT_DIR"
+    show_dialog "Error: Project directory not found.\n\nPlease make sure the Quilt DataTools project is located at:\n$PROJECT_DIR"
+    exit 1
+fi
+
+cd "$PROJECT_DIR" || {
+    log "Error: Could not change to project directory!"
+    show_dialog "Error: Could not access the project directory."
+    exit 1
+}
+
+# Use bundled Node.js (no need to find node on the system)
+log "Using bundled Node.js executable"
+
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+NODE_PATH="$SCRIPT_DIR/node"
+
+# Verify the bundled node executable exists and is executable
+if [ ! -x "$NODE_PATH" ]; then
+    log "Error: Bundled Node.js executable not found or not executable at $NODE_PATH"
+    show_dialog "Error: Bundled Node.js executable not found.\n\nThe application appears to be damaged. Please reinstall Quilt DataTools."
+    exit 1
+fi
+
+log "Using bundled Node.js at: $NODE_PATH"
+
+# Start the server in the background
+log "Starting Node.js server..."
+
+# Verify the server.js file exists
+if [ ! -f "server.js" ]; then
+    log "Error: server.js not found at $(pwd)/server.js"
+    show_dialog "Error: server.js not found in the project directory.\n\nPlease make sure the file exists at: $(pwd)/server.js"
+    exit 1
+fi
+
+log "Executing: $NODE_PATH server.js"
+
+# Use the bundled Node.js executable
+"$NODE_PATH" server.js &>"$LOGFILE" &
+SERVER_PID=$!
+
+# Check if server started successfully
+sleep 2
+if ! ps -p $SERVER_PID > /dev/null; then
+    log "Error: Failed to start server"
+    show_dialog "Error: Failed to start Quilt DataTools server.\n\nCheck the log file at: $LOGFILE"
+    exit 1
+fi
+
+# Open the browser specifically to the Quilt-themed page
+URL="http://localhost:$PORT/quilt-index.html"
+log "Opening browser at $URL"
+open "$URL"
+
+# Show notification
+osascript -e "display notification \"Server running at $URL\" with title \"Quilt DataTools\" subtitle \"Specialty Retail Tools\""
+
+# Keep the app running until the server process exits
+log "Server running with PID: $SERVER_PID"
+wait $SERVER_PID

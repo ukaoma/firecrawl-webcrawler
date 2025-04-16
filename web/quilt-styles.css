@@ -1,0 +1,357 @@
+/* Quilt Software Branding Colors */
+:root {
+    --quilt-primary: #171F4C;       /* Primary color for headings, buttons, active tab border */
+    --quilt-secondary: #8F568F;     /* Secondary accent color for secondary actions, progress bars */
+    --quilt-tertiary: #232031;      /* Tertiary color for footer background */
+    --quilt-light: #f8f9fa;         /* Light background shade */
+    --quilt-white: #ffffff;         /* Pure white for backgrounds */
+    --quilt-body-text: #0E0E0F;     /* Main text color */
+    --quilt-text: #0E0E0F;          /* Main text color (keeping for compatibility) */
+    --quilt-text-light: #6c7293;    /* Secondary text color */
+    --quilt-dark: #0c1633;          /* Darker shade for highlights */
+    --quilt-link: #0c63ff;          /* Link color */
+    --quilt-link-hover: #0da6ff;    /* Link hover color */
+    --quilt-success: #27ae60;       /* Success states */
+    --quilt-error: #e74c3c;         /* Error states */
+    --quilt-warning: #f39c12;       /* Warning states */
+    --quilt-border: #e2e8f0;        /* Border color */
+}
+
+/* General Styles */
+body {
+    background-color: var(--quilt-light);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--quilt-text);
+    line-height: 1.6;
+}
+
+/* Header Styling */
+header {
+    background-color: var(--quilt-primary);
+    padding: 2rem 0;
+    margin-bottom: 2.5rem !important;
+    border-radius: 10px;
+}
+
+header img.logo {
+    height: 40px;
+    margin-bottom: 1rem;
+}
+
+header h1 {
+    color: var(--quilt-white);
+    font-weight: 700;
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+}
+
+header p.lead {
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 1.2rem;
+    font-weight: 400;
+}
+
+/* Card Styling */
+.card {
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+    background-color: var(--quilt-white);
+    overflow: hidden;
+}
+
+.card-header {
+    background-color: var(--quilt-white);
+    border-bottom: 1px solid var(--quilt-border);
+    padding: 1.25rem 1.5rem;
+}
+
+.card-body {
+    padding: 1.5rem;
+}
+
+.card-footer {
+    background-color: var(--quilt-white);
+    border-top: 1px solid var(--quilt-border);
+    padding: 1.25rem 1.5rem;
+}
+
+/* Tab Styling */
+.nav-tabs {
+    border-bottom: none;
+}
+
+.nav-tabs .nav-link {
+    color: var(--quilt-text-light);
+    font-weight: 500;
+    padding: 0.75rem 1.25rem;
+    border: none;
+    border-radius: 0;
+    margin-right: 0.5rem;
+    transition: all 0.2s ease;
+}
+
+.nav-tabs .nav-link:hover {
+    color: var(--quilt-primary);
+    background-color: rgba(30, 43, 80, 0.05);
+}
+
+.nav-tabs .nav-link.active {
+    color: var(--quilt-primary);
+    background-color: transparent;
+    border-bottom: 3px solid var(--quilt-primary);
+    font-weight: 600;
+}
+
+/* Form Controls */
+.form-control, .input-group-text {
+    border-radius: 8px;
+    border: 1px solid var(--quilt-border);
+    padding: 0.75rem 1rem;
+}
+
+.form-control:focus {
+    border-color: var(--quilt-secondary);
+    box-shadow: 0 0 0 0.2rem rgba(143, 86, 143, 0.25);
+}
+
+textarea.form-control {
+    min-height: 120px;
+}
+
+/* Button Styling */
+.btn {
+    border-radius: 8px;
+    padding: 0.75rem 1.5rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.btn-primary {
+    background-color: var(--quilt-primary);
+    border-color: var(--quilt-primary);
+}
+
+.btn-primary:hover, .btn-primary:focus {
+    background-color: var(--quilt-dark);
+    border-color: var(--quilt-dark);
+    box-shadow: 0 4px 10px rgba(30, 43, 80, 0.3);
+}
+
+.btn-success {
+    background-color: var(--quilt-secondary);
+    border-color: var(--quilt-secondary);
+}
+
+.btn-success:hover, .btn-success:focus {
+    background-color: #7A4A7A; /* Darker purple */
+    border-color: #7A4A7A;
+    box-shadow: 0 4px 10px rgba(143, 86, 143, 0.3);
+}
+
+.btn-sm {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+/* Progress Bar */
+.progress {
+    height: 0.75rem;
+    border-radius: 10px;
+    background-color: #e9ecef;
+    overflow: hidden;
+}
+
+.progress-bar {
+    background-color: var(--quilt-secondary);
+    transition: width 0.6s ease;
+}
+
+@keyframes progress-pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+
+.progress-bar-animated {
+    animation: progress-pulse 2s infinite;
+}
+
+/* Status Indicators */
+.status-success {
+    color: var(--quilt-success);
+    font-weight: 500;
+}
+
+.status-error {
+    color: var(--quilt-error);
+    font-weight: 500;
+}
+
+.status-pending {
+    color: var(--quilt-text-light);
+    font-style: italic;
+}
+
+/* Loading Overlay */
+#loadingOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(12, 22, 51, 0.85);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+#loadingOverlay .spinner-border {
+    width: 3rem;
+    height: 3rem;
+    color: var(--quilt-secondary) !important;
+}
+
+#loadingOverlay p {
+    color: var(--quilt-white) !important;
+    font-size: 1.1rem;
+    margin-top: 1rem;
+}
+
+/* Table Styling */
+.table {
+    color: var(--quilt-text);
+}
+
+.table-responsive {
+    border-radius: 8px;
+    overflow: hidden;
+    max-height: 400px;
+}
+
+.table th {
+    background-color: rgba(30, 43, 80, 0.05);
+    color: var(--quilt-primary);
+    font-weight: 600;
+    border-top: none;
+    padding: 1rem;
+}
+
+.table td {
+    padding: 0.75rem 1rem;
+    vertical-align: middle;
+}
+
+.table-striped tbody tr:nth-of-type(odd) {
+    background-color: rgba(248, 249, 250, 0.5);
+}
+
+.table-hover tbody tr:hover {
+    background-color: rgba(143, 86, 143, 0.05);
+}
+
+/* CSV Preview */
+#csvPreview {
+    max-height: 250px;
+    overflow-y: auto;
+    border: 1px solid var(--quilt-border);
+    border-radius: 8px;
+    padding: 1rem;
+}
+
+#csvPreviewTable {
+    font-size: 0.9rem;
+}
+
+/* Website Map Feature */
+#mapResultsSection {
+    transition: all 0.3s ease;
+}
+
+#mapResults {
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    color: var(--quilt-text);
+    background-color: var(--quilt-light);
+    border-radius: 8px;
+    padding: 1rem;
+    max-height: 350px;
+    overflow-y: auto;
+    border: 1px solid var(--quilt-border);
+}
+
+#mapStatus {
+    margin-bottom: 0.75rem;
+    font-weight: 500;
+    color: var(--quilt-text-light);
+}
+
+#urlCount {
+    font-weight: 600;
+    color: var(--quilt-secondary);
+}
+
+/* Form check styling */
+.form-check-input {
+    width: 1.25em;
+    height: 1.25em;
+    margin-top: 0.125em;
+}
+
+.form-check-input:checked {
+    background-color: var(--quilt-secondary);
+    border-color: var(--quilt-secondary);
+}
+
+.form-check-label {
+    margin-left: 0.25rem;
+}
+
+/* Results Section */
+#resultsSection {
+    margin-top: 2rem;
+    transition: all 0.3s ease;
+}
+
+#processingStatus {
+    color: var(--quilt-text-light);
+    margin-bottom: 1rem;
+}
+
+/* Footer Styling */
+footer {
+    background-color: var(--quilt-tertiary);
+    padding: 2rem 0;
+    border-radius: 10px;
+    margin-top: 3rem;
+    color: var(--quilt-white);
+}
+
+footer small {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 2rem;
+    }
+    
+    .card-header-tabs .nav-link {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.9rem;
+    }
+    
+    .btn {
+        padding: 0.5rem 1rem;
+    }
+    
+    #resultsTable {
+        font-size: 0.85rem;
+    }
+}
+
+/* Clean background - removed pattern */

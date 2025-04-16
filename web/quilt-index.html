@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quilt DataTools - ZIP Code & Website Mapper</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <!-- Custom Quilt Styles -->
+    <link rel="stylesheet" href="quilt-styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="my-5 text-center">
+            <div class="mb-4">
+                <img src="https://quiltsoftware.com/hubfs/sr-quilt/Images/Quilt%202x%20logo.svg" alt="Quilt Logo" class="logo">
+            </div>
+            <h1>FireCrawl DataTools</h1>
+            <p class="lead"> Internal Data extraction & website mapping tools</p>
+        </header>
+
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <ul class="nav nav-tabs card-header-tabs" id="inputTabs" role="tablist">
+                            <li class="nav-item">
+                                <a class="nav-link active" id="paste-tab" data-bs-toggle="tab" href="#paste" role="tab">Paste ZIP Codes</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" id="upload-tab" data-bs-toggle="tab" href="#upload" role="tab">Upload CSV</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" id="map-tab" data-bs-toggle="tab" href="#map" role="tab">Website Map</a>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="card-body">
+                        <div class="tab-content">
+                            <!-- Paste ZIP Codes Tab -->
+                            <div class="tab-pane fade show active" id="paste" role="tabpanel">
+                                <p>Enter ZIP codes (one per line or comma-separated):</p>
+                                <textarea class="form-control" id="zipCodesInput" rows="8" placeholder="Example: 
+02532
+02536
+02723
+Or: 02532, 02536, 02723"></textarea>
+                            </div>
+                            
+                            <!-- Upload CSV Tab -->
+                            <div class="tab-pane fade" id="upload" role="tabpanel">
+                                <p>Upload a CSV file with ZIP codes (must have a column named "Zip/Postal Code" or similar):</p>
+                                <div class="mb-3">
+                                    <input class="form-control" type="file" id="csvFileInput" accept=".csv">
+                                    <div class="form-text mt-1">
+                                        <a href="sample_zips.csv" download>Download sample CSV file</a> to test the uploader.
+                                    </div>
+                                </div>
+                                <div id="csvPreview" class="mt-3 d-none">
+                                    <p><strong>CSV Preview:</strong></p>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-bordered" id="csvPreviewTable">
+                                            <!-- CSV preview content will be inserted here -->
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Website Map Tab -->
+                            <div class="tab-pane fade" id="map" role="tabpanel">
+                                <p>Enter a website URL to map all linked pages:</p>
+                                <div class="input-group mb-3">
+                                    <input type="url" class="form-control" id="websiteUrlInput" 
+                                           placeholder="https://example.com" 
+                                           aria-label="Website URL" aria-describedby="map-button">
+                                    <button class="btn btn-primary" type="button" id="mapButton">Map Website</button>
+                                </div>
+                                <div class="form-text mb-3">
+                                    This will crawl the website and find all linked URLs, ranked by importance.
+                                </div>
+                                
+                                <!-- Map Results Section -->
+                                <div id="mapResultsSection" class="d-none">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h6 class="mb-0">Found URLs: <span id="urlCount">0</span></h6>
+                                        <button id="downloadUrlsButton" class="btn btn-success btn-sm">Download URLs</button>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div id="mapProgressContainer" class="progress mb-2">
+                                            <div id="mapProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                        </div>
+                                        <div id="mapStatus"></div>
+                                    </div>
+                                    <div class="bg-light p-2 border rounded">
+                                        <pre id="mapResults" class="mb-0"></pre>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-footer" id="zipCodeFooter">
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="batchProcessingCheck" checked>
+                            <label class="form-check-label" for="batchProcessingCheck">
+                                Process in batches of 5 (recommended for better reliability)
+                            </label>
+                        </div>
+                        <button id="processButton" class="btn btn-primary">Process ZIP Codes</button>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div id="resultsSection" class="card d-none">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Results</h5>
+                        <button id="downloadButton" class="btn btn-success btn-sm">Download CSV</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="progress mb-3">
+                            <div id="progressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <div id="processingStatus"></div>
+                        <div class="table-responsive mt-3">
+                            <table class="table table-striped table-hover" id="resultsTable">
+                                <thead>
+                                    <tr>
+                                        <th>ZIP Code</th>
+                                        <th>Population</th>
+                                        <th>Density</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resultsTableBody">
+                                    <!-- Results will be inserted here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <footer class="text-center py-4 mt-5">
+            <small class="text-muted">Powered by Quilt Software &copy; 2025</small>
+        </footer>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="d-none">
+        <div class="spinner-border text-light" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="text-light mt-3">Processing ZIP codes...</p>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

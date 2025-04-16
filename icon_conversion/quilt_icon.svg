@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="200" ry="200" fill="#1e2b50"/>
+  
+  <!-- Quilt pattern - simplified version of their logo pattern -->
+  <!-- Top-left square -->
+  <rect x="200" y="200" width="270" height="270" fill="#2a9d8f"/>
+  
+  <!-- Top-right square -->
+  <rect x="554" y="200" width="270" height="270" fill="#2a9d8f" fill-opacity="0.8"/>
+  
+  <!-- Bottom-left square -->
+  <rect x="200" y="554" width="270" height="270" fill="#2a9d8f" fill-opacity="0.8"/>
+  
+  <!-- Bottom-right square -->
+  <rect x="554" y="554" width="270" height="270" fill="#2a9d8f" fill-opacity="0.6"/>
+  
+  <!-- Text "Quilt" at the bottom -->
+  <text x="512" y="925" font-family="Inter, Arial, sans-serif" font-size="120" font-weight="bold" text-anchor="middle" fill="white">
+    Quilt
+  </text>
+</svg>
