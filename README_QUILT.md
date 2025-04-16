@@ -26,8 +26,9 @@ This application is a rebranded version of the Firecrawl webcrawler, styled to m
 
 2. Launch Quilt DataTools from your Applications folder or Spotlight.
 
-### Option 2: Using the Shell Script
+### Option 2: Using the Shell Scripts
 
+#### Starting the Application:
 Run the launcher script from the terminal:
 ```bash
 ./launch_quilt.sh
@@ -35,8 +36,18 @@ Run the launcher script from the terminal:
 
 This will:
 1. Start the Node.js server
-2. Open your default browser to the Quilt-styled interface at http://localhost:3000/quilt-index.html
-3. Keep running until you press Ctrl+C in the terminal
+2. Automatically open your default browser to the Quilt-styled interface at http://localhost:3000/quilt-index.html
+3. Keep running until terminated
+
+#### Stopping the Application:
+When you're done using the application, you can stop it using either method:
+
+- **Option A:** Press Ctrl+C in the terminal where you ran `launch_quilt.sh`
+- **Option B:** Run the kill script from any terminal:
+  ```bash
+  ./kill_quilt.sh
+  ```
+  This script will find and terminate the Quilt DataTools process that's running on port 3000.
 
 ## ZIP Code Data Extraction
 
