@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZIP Code Data Extractor</title>
+    <title>Firecrawl Tools - ZIP Data & Website Mapper</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="container">
         <header class="my-5 text-center">
-            <h1>ZIP Code Data Extractor</h1>
-            <p class="lead">Extract population and density data for US ZIP codes</p>
+            <h1>Firecrawl Tools</h1>
+            <p class="lead">Extract ZIP code data and map website URLs with Firecrawl API</p>
         </header>
 
         <div class="row justify-content-center">
@@ -24,6 +24,9 @@
                             </li>
                             <li class="nav-item">
                                 <a class="nav-link" id="upload-tab" data-bs-toggle="tab" href="#upload" role="tab">Upload CSV</a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" id="map-tab" data-bs-toggle="tab" href="#map" role="tab">Website Map</a>
                             </li>
                         </ul>
                     </div>
@@ -57,9 +60,40 @@ Or: 02532, 02536, 02723"></textarea>
                                     </div>
                                 </div>
                             </div>
+                            
+                            <!-- Website Map Tab -->
+                            <div class="tab-pane fade" id="map" role="tabpanel">
+                                <p>Enter a website URL to map all linked pages:</p>
+                                <div class="input-group mb-3">
+                                    <input type="url" class="form-control" id="websiteUrlInput" 
+                                           placeholder="https://example.com" 
+                                           aria-label="Website URL" aria-describedby="map-button">
+                                    <button class="btn btn-primary" type="button" id="mapButton">Map Website</button>
+                                </div>
+                                <div class="form-text mb-3">
+                                    This will crawl the website and find all linked URLs.
+                                </div>
+                                
+                                <!-- Map Results Section -->
+                                <div id="mapResultsSection" class="d-none">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h6 class="mb-0">Found URLs: <span id="urlCount">0</span></h6>
+                                        <button id="downloadUrlsButton" class="btn btn-success btn-sm">Download URLs</button>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div id="mapProgressContainer" class="progress mb-2">
+                                            <div id="mapProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                        </div>
+                                        <div id="mapStatus"></div>
+                                    </div>
+                                    <div class="bg-light p-2 border rounded">
+                                        <pre id="mapResults" class="mb-0" style="max-height: 300px; overflow-y: auto; white-space: pre-wrap;"></pre>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <div class="card-footer">
+                    <div class="card-footer" id="zipCodeFooter">
                         <div class="form-check mb-3">
                             <input class="form-check-input" type="checkbox" id="batchProcessingCheck" checked>
                             <label class="form-check-label" for="batchProcessingCheck">

@@ -116,3 +116,32 @@ body {
     border-radius: 0.25rem;
     padding: 0.5rem;
 }
+
+/* Website Map Feature Styling */
+#mapResults {
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: #333;
+    background-color: #f8f9fa;
+    max-height: 300px;
+    overflow-y: auto;
+    white-space: nowrap;
+    overflow-x: auto;
+}
+
+#mapStatus {
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+/* URL list hover effect */
+#mapResults:hover {
+    border-color: #86b7fe;
+}
+
+/* URL counter badge */
+#urlCount {
+    font-weight: bold;
+    color: #0d6efd;
+}

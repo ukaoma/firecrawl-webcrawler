@@ -15,6 +15,17 @@ const processingStatus = document.getElementById('processingStatus');
 const resultsTableBody = document.getElementById('resultsTableBody');
 const downloadButton = document.getElementById('downloadButton');
 const loadingOverlay = document.getElementById('loadingOverlay');
+const loadingMessage = loadingOverlay ? loadingOverlay.querySelector('p') : null;
+
+// Map Feature DOM Elements
+const websiteUrlInput = document.getElementById('websiteUrlInput');
+const mapButton = document.getElementById('mapButton');
+const mapResultsSection = document.getElementById('mapResultsSection');
+const urlCount = document.getElementById('urlCount');
+const downloadUrlsButton = document.getElementById('downloadUrlsButton');
+const mapProgressBar = document.getElementById('mapProgressBar');
+const mapStatus = document.getElementById('mapStatus');
+const mapResults = document.getElementById('mapResults');
 
 // Global Variables
 let zipCodes = [];
@@ -30,9 +41,13 @@ document.addEventListener('DOMContentLoaded', () => {
     processButton.addEventListener('click', processZipCodes);
     downloadButton.addEventListener('click', downloadResults);
     csvFileInput.addEventListener('change', handleCSVUpload);
+    mapButton.addEventListener('click', processWebsiteMap);
+    downloadUrlsButton.addEventListener('click', downloadMapResults);
     
     // Initialize Bootstrap tabs
     const tabElements = document.querySelectorAll('a[data-bs-toggle="tab"]');
+    const zipCodeFooter = document.getElementById('zipCodeFooter');
+    
     tabElements.forEach(tab => {
         tab.addEventListener('click', (e) => {
             e.preventDefault();
@@ -46,6 +61,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const target = document.querySelector(tab.getAttribute('href'));
             target.classList.add('show');
             target.classList.add('active');
+            
+            // Show/hide ZIP code footer based on active tab
+            if (tab.id === 'map-tab') {
+                zipCodeFooter.classList.add('d-none');
+            } else {
+                zipCodeFooter.classList.remove('d-none');
+            }
         });
     });
 });
@@ -172,7 +194,10 @@ async function processZipCodes() {
     // Initialize the results table
     initializeResultsTable();
     
-    // Show loading UI
+    // Show loading UI with ZIP codes message
+    if (loadingMessage) {
+        loadingMessage.textContent = 'Processing ZIP codes...';
+    }
     loadingOverlay.classList.remove('d-none');
     resultsSection.classList.remove('d-none');
     progressBar.style.width = '0%';
@@ -521,6 +546,396 @@ function downloadResults() {
     const link = document.createElement('a');
     link.setAttribute('href', url);
     link.setAttribute('download', 'zip_code_data.csv');
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+// Process website mapping
+async function processWebsiteMap() {
+    // Get website URL
+    const url = websiteUrlInput.value.trim();
+    
+    if (!url) {
+        alert('Please enter a website URL to map.');
+        return;
+    }
+    
+    // Validate URL format
+    try {
+        new URL(url); // This will throw an error if the URL is invalid
+    } catch (e) {
+        alert('Please enter a valid URL (including http:// or https://)');
+        return;
+    }
+    
+    // Show the results section
+    mapResultsSection.classList.remove('d-none');
+    
+    // Clear previous results
+    mapResults.textContent = '';
+    mapStatus.textContent = 'Starting website mapping...';
+    mapProgressBar.style.width = '10%';
+    mapProgressBar.classList.add('progress-bar-animated');
+    urlCount.textContent = '0';
+    
+    // Show loading UI with website mapping message
+    if (loadingMessage) {
+        loadingMessage.textContent = 'Mapping website URLs...';
+    }
+    loadingOverlay.classList.remove('d-none');
+    
+    try {
+        // Map the website
+        mapStatus.textContent = 'Fetching all website URLs...';
+        const mapData = await fetchWebsiteMap(url);
+        console.log('Received map data:', mapData);
+        
+        // Update progress
+        mapProgressBar.style.width = '50%';
+        
+        // Process the mapped URLs - the API returns 'links' not 'urls'
+        if (mapData && mapData.links && Array.isArray(mapData.links)) {
+            const allUrls = mapData.links;
+            
+            // Fetch homepage links for ranking
+            mapStatus.textContent = 'Analyzing homepage links for ranking...';
+            const homepageLinks = await fetchHomepageLinks(url);
+            console.log('Homepage links:', homepageLinks);
+            
+            // Rank the URLs
+            mapStatus.textContent = 'Ranking URLs by importance...';
+            const rankedUrls = rankUrlsByImportance(allUrls, homepageLinks, url);
+            
+            // Display the results
+            urlCount.textContent = rankedUrls.length.toString();
+            
+            // Format the URLs nicely, one per line
+            const formattedUrls = rankedUrls.join('\n');
+            mapResults.textContent = formattedUrls;
+            
+            // Complete the progress bar
+            mapProgressBar.style.width = '100%';
+            mapProgressBar.classList.remove('progress-bar-animated');
+            mapStatus.textContent = `Mapping complete. Found ${rankedUrls.length} URLs, ranked by importance.`;
+        } else {
+            // No URLs found or unexpected response format
+            // Try to find links in other places in the response
+            if (mapData && mapData.success) {
+                urlCount.textContent = "0";
+                mapStatus.textContent = 'No URLs found in response. The website may not have any links or may be blocking crawlers.';
+            } else {
+                mapStatus.textContent = 'Unexpected response format received from API.';
+            }
+            
+            console.error('Invalid map data format:', mapData);
+            mapProgressBar.style.width = '100%';
+            mapProgressBar.classList.remove('progress-bar-animated');
+            mapResults.textContent = 'No URLs found.';
+        }
+    } catch (error) {
+        console.error('Error mapping website:', error);
+        mapStatus.textContent = `Error: ${error.message}`;
+        mapStatus.classList.add('text-danger');
+        mapProgressBar.style.width = '100%';
+        mapProgressBar.classList.remove('progress-bar-animated');
+    } finally {
+        loadingOverlay.classList.add('d-none');
+    }
+}
+
+// Fetch homepage links using the /scrape endpoint
+async function fetchHomepageLinks(url) {
+    console.log(`Fetching homepage links from: ${url}`);
+    
+    try {
+        // Use the extract endpoint with a specific schema for links
+        const response = await fetch('https://api.firecrawl.dev/v1/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEY}`
+            },
+            body: JSON.stringify({
+                urls: [url],
+                prompt: "Extract all links from this homepage. Only include links to internal pages within the same domain.",
+                schema: {
+                    type: "object",
+                    properties: {
+                        links: {
+                            type: "array",
+                            items: {
+                                type: "string"
+                            }
+                        }
+                    }
+                }
+            })
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.warn(`Failed to fetch homepage links: ${errorText}`);
+            // Return empty array rather than failing completely
+            return [];
+        }
+        
+        const jobResponse = await response.json();
+        const jobId = jobResponse.id;
+        
+        if (!jobId) {
+            console.warn('No job ID returned from API when fetching homepage links');
+            return [];
+        }
+        
+        // Set up polling for job completion
+        const MAX_POLLING_ATTEMPTS = 10;
+        const POLLING_INTERVAL_MS = 1500;
+        
+        let attempts = 0;
+        let jobComplete = false;
+        
+        while (!jobComplete && attempts < MAX_POLLING_ATTEMPTS) {
+            attempts++;
+            console.log(`Polling for homepage links job completion (attempt ${attempts}/${MAX_POLLING_ATTEMPTS})...`);
+            
+            // Check job status
+            const statusUrl = `https://api.firecrawl.dev/v1/extract/${jobId}`;
+            const statusResponse = await fetch(statusUrl, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${API_KEY}`
+                }
+            });
+            
+            if (!statusResponse.ok) {
+                console.warn(`Homepage links status check failed: ${statusResponse.status}`);
+                await sleep(POLLING_INTERVAL_MS);
+                continue;
+            }
+            
+            const statusResult = await statusResponse.json();
+            
+            // Check if job is complete
+            if (statusResult.status === 'completed') {
+                console.log('Homepage links job completed!');
+                jobComplete = true;
+                
+                // Try to extract the link data
+                let homepageLinks = [];
+                
+                if (statusResult.data && statusResult.data.links && Array.isArray(statusResult.data.links)) {
+                    homepageLinks = statusResult.data.links;
+                } else if (statusResult.links && Array.isArray(statusResult.links)) {
+                    homepageLinks = statusResult.links;
+                }
+                
+                return homepageLinks;
+            } else if (statusResult.status === 'failed') {
+                console.warn('Homepage links job failed');
+                return [];
+            } else {
+                await sleep(POLLING_INTERVAL_MS);
+            }
+        }
+        
+        if (!jobComplete) {
+            console.warn(`Homepage links job did not complete after ${MAX_POLLING_ATTEMPTS} attempts`);
+            return [];
+        }
+        
+        return [];
+    } catch (error) {
+        console.error('Failed to fetch homepage links:', error);
+        return [];
+    }
+}
+
+// Rank URLs by importance based on homepage links and URL patterns
+function rankUrlsByImportance(allUrls, homepageLinks, baseUrl) {
+    // Helper function to get domain from URL
+    const getDomain = (url) => {
+        try {
+            const urlObj = new URL(url);
+            return urlObj.hostname;
+        } catch (e) {
+            return "";
+        }
+    };
+    
+    // Get the base domain for comparison
+    const baseDomain = getDomain(baseUrl);
+    
+    // Cleanup and normalize homepage links
+    const normalizedHomepageLinks = homepageLinks.map(link => {
+        // Handle relative URLs
+        try {
+            return new URL(link, baseUrl).href;
+        } catch (e) {
+            return link;
+        }
+    }).filter(link => {
+        // Keep only links to the same domain
+        return getDomain(link) === baseDomain || getDomain(link) === "";
+    });
+    
+    // Create priority buckets
+    const highPriority = [];   // Homepage links
+    const mediumPriority = []; // Other important pages
+    const lowPriority = [];    // Blog, resources, docs, etc.
+    
+    // Define patterns for low priority content
+    const lowPriorityPatterns = [
+        /blog/i, 
+        /article/i, 
+        /resource/i, 
+        /doc(?:umentation)?/i,
+        /support/i,
+        /help/i,
+        /faq/i,
+        /case-stud(?:y|ies)/i,
+        /tutorial/i,
+        /knowledge/i,
+        /press/i,
+        /news/i,
+        /archive/i,
+        /changelog/i,
+        /legal/i,
+        /privacy/i,
+        /terms/i
+    ];
+    
+    // Define patterns for high/medium priority pages
+    const highPriorityPatterns = [
+        /pricing/i,
+        /product/i,
+        /feature/i,
+        /service/i,
+        /about/i,
+        /contact/i,
+        /demo/i,
+        /trial/i,
+        /signup/i,
+        /register/i,
+        /login/i
+    ];
+    
+    // First pass: always put the homepage at the top
+    const homepage = allUrls.find(url => {
+        try {
+            const urlObj = new URL(url);
+            return urlObj.pathname === "/" || urlObj.pathname === "";
+        } catch (e) {
+            return false;
+        }
+    });
+    
+    if (homepage) {
+        highPriority.push(homepage);
+    }
+    
+    // Process each URL
+    allUrls.forEach(url => {
+        // Skip if this is the homepage (already processed)
+        if (url === homepage) {
+            return;
+        }
+        
+        // Check if URL is in homepage links (high priority)
+        if (normalizedHomepageLinks.some(link => link === url)) {
+            highPriority.push(url);
+        }
+        // Check if URL matches low priority patterns
+        else if (lowPriorityPatterns.some(pattern => pattern.test(url))) {
+            lowPriority.push(url);
+        }
+        // Check if URL matches high priority patterns
+        else if (highPriorityPatterns.some(pattern => pattern.test(url))) {
+            highPriority.push(url);
+        }
+        // Everything else is medium priority
+        else {
+            mediumPriority.push(url);
+        }
+    });
+    
+    // Sort each bucket by path depth (shorter paths ranked higher)
+    const sortByPathDepth = (a, b) => {
+        try {
+            const aDepth = new URL(a).pathname.split('/').filter(Boolean).length;
+            const bDepth = new URL(b).pathname.split('/').filter(Boolean).length;
+            return aDepth - bDepth;
+        } catch (e) {
+            return 0;
+        }
+    };
+    
+    highPriority.sort(sortByPathDepth);
+    mediumPriority.sort(sortByPathDepth);
+    lowPriority.sort(sortByPathDepth);
+    
+    // Combine the priority buckets
+    return [...highPriority, ...mediumPriority, ...lowPriority];
+}
+
+// Fetch website map data from the Firecrawl API
+async function fetchWebsiteMap(url) {
+    console.log(`Making API request to map website: ${url}`);
+    
+    try {
+        // Make the API request to the map endpoint
+        const response = await fetch('https://api.firecrawl.dev/v1/map', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEY}`
+            },
+            body: JSON.stringify({
+                url: url
+            })
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`API returned status ${response.status}: ${errorText}`);
+        }
+        
+        const mapData = await response.json();
+        console.log('Map API Response:', JSON.stringify(mapData, null, 2));
+        
+        return mapData;
+    } catch (error) {
+        console.error('Map API request failed:', error);
+        throw error;
+    }
+}
+
+// Download the map results as a CSV file
+function downloadMapResults() {
+    const urls = mapResults.textContent;
+    
+    if (!urls.trim()) {
+        alert('No URLs to download.');
+        return;
+    }
+    
+    // Format as CSV with header
+    let csvContent = "URLs\n";
+    
+    // Add each URL as a row in the CSV
+    const urlList = urls.split('\n').filter(url => url.trim());
+    urlList.forEach(url => {
+        csvContent += `${url}\n`;
+    });
+    
+    // Create a blob and download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'sitemap.csv');
     link.style.display = 'none';
     
     document.body.appendChild(link);

@@ -1,0 +1,45 @@
+{
+  "original": [
+    "https://example.com/",
+    "https://example.com/pricing",
+    "https://example.com/product",
+    "https://example.com/features",
+    "https://example.com/blog",
+    "https://example.com/blog/article1",
+    "https://example.com/blog/article2",
+    "https://example.com/docs",
+    "https://example.com/docs/api",
+    "https://example.com/contact",
+    "https://example.com/about",
+    "https://example.com/terms",
+    "https://example.com/privacy",
+    "https://example.com/faq",
+    "https://example.com/support",
+    "https://example.com/resources"
+  ],
+  "homepageLinks": [
+    "https://example.com/pricing",
+    "https://example.com/product",
+    "https://example.com/features",
+    "https://example.com/contact",
+    "https://example.com/about"
+  ],
+  "ranked": [
+    "https://example.com/",
+    "https://example.com/pricing",
+    "https://example.com/product",
+    "https://example.com/features",
+    "https://example.com/contact",
+    "https://example.com/about",
+    "https://example.com/blog",
+    "https://example.com/docs",
+    "https://example.com/terms",
+    "https://example.com/privacy",
+    "https://example.com/faq",
+    "https://example.com/support",
+    "https://example.com/resources",
+    "https://example.com/blog/article1",
+    "https://example.com/blog/article2",
+    "https://example.com/docs/api"
+  ]
+}
