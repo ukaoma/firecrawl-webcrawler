@@ -1,147 +1,20 @@
-/* General Styles */
-body {
-    background-color: #f8f9fa;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-}
-
-/* Loading Overlay */
-#loadingOverlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: rgba(0, 0, 0, 0.7);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
-}
-
-/* Table Styles */
-.table-responsive {
-    max-height: 400px;
-    overflow-y: auto;
-}
-
-#csvPreviewTable {
-    font-size: 0.9rem;
-}
-
-/* Status Indicators */
+/* Status indicator colors for tables */
 .status-success {
     color: #198754;
+    font-weight: 500;
 }
 
 .status-error {
     color: #dc3545;
+    font-weight: 500;
 }
 
 .status-pending {
     color: #6c757d;
+    font-style: italic;
 }
 
-/* Progress Bar Animation */
-@keyframes progress-pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.5; }
-    100% { opacity: 1; }
-}
-
-.progress-bar-animated {
-    animation: progress-pulse 2s infinite;
-}
-
-/* Results Table */
-#resultsTable th, 
-#resultsTable td {
-    vertical-align: middle;
-}
-
-/* Card Styles */
-.card {
-    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-    border: none;
-}
-
-.card-header {
-    background-color: #f8f9fa;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.125);
-}
-
-/* Input Focus Styles */
-.form-control:focus {
-    border-color: #86b7fe;
-    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
-}
-
-/* Button Hover Effects */
-.btn-primary:hover {
-    background-color: #0a58ca;
-    border-color: #0a53be;
-}
-
-.btn-success:hover {
-    background-color: #157347;
-    border-color: #146c43;
-}
-
-/* Responsive Adjustments */
-@media (max-width: 768px) {
-    .card-header-tabs {
-        display: flex;
-        justify-content: space-between;
-    }
-    
-    .card-header-tabs .nav-link {
-        padding: 0.5rem 0.75rem;
-    }
-    
-    #resultsTable {
-        font-size: 0.85rem;
-    }
-}
-
-/* File Input Styling */
-.form-control[type=file] {
-    padding: 0.375rem 0.75rem;
-}
-
-/* CSV Preview Styling */
-#csvPreview {
-    max-height: 200px;
-    overflow-y: auto;
-    border: 1px solid #dee2e6;
-    border-radius: 0.25rem;
-    padding: 0.5rem;
-}
-
-/* Website Map Feature Styling */
-#mapResults {
-    font-family: 'Courier New', monospace;
-    font-size: 0.85rem;
-    line-height: 1.5;
-    color: #333;
-    background-color: #f8f9fa;
-    max-height: 300px;
-    overflow-y: auto;
-    white-space: nowrap;
-    overflow-x: auto;
-}
-
-#mapStatus {
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-}
-
-/* URL list hover effect */
-#mapResults:hover {
-    border-color: #86b7fe;
-}
-
-/* URL counter badge */
-#urlCount {
-    font-weight: bold;
+.status-processing {
     color: #0d6efd;
+    font-weight: 500;
 }

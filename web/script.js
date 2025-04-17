@@ -27,6 +27,17 @@ const mapProgressBar = document.getElementById('mapProgressBar');
 const mapStatus = document.getElementById('mapStatus');
 const mapResults = document.getElementById('mapResults');
 
+// Bulk Extract Feature DOM Elements
+const bulkUrlsInput = document.getElementById('bulkUrlsInput');
+const extractionPromptInput = document.getElementById('extractionPromptInput');
+const processBulkUrlsButton = document.getElementById('processBulkUrlsButton');
+const bulkResultsSection = document.getElementById('bulkResultsSection');
+const bulkProgressBar = document.getElementById('bulkProgressBar');
+const bulkStatus = document.getElementById('bulkStatus');
+const bulkResultsTable = document.getElementById('bulkResultsTable');
+const bulkResultsTableBody = document.getElementById('bulkResultsTableBody');
+const downloadBulkResultsButton = document.getElementById('downloadBulkResultsButton');
+
 // Global Variables
 let zipCodes = [];
 let results = [];
@@ -34,6 +45,10 @@ let csvHeaders = [];
 let processingComplete = false;
 let currentBatchIndex = 0;
 let totalBatches = 0;
+
+// Bulk Extract Global Variables
+let bulkResults = [];
+let bulkExtractionComplete = false;
 
 // Initialize the page
 document.addEventListener('DOMContentLoaded', () => {
@@ -43,6 +58,8 @@ document.addEventListener('DOMContentLoaded', () => {
     csvFileInput.addEventListener('change', handleCSVUpload);
     mapButton.addEventListener('click', processWebsiteMap);
     downloadUrlsButton.addEventListener('click', downloadMapResults);
+    processBulkUrlsButton.addEventListener('click', processBulkUrls);
+    downloadBulkResultsButton.addEventListener('click', downloadBulkResults);
     
     // Initialize Bootstrap tabs
     const tabElements = document.querySelectorAll('a[data-bs-toggle="tab"]');
@@ -63,7 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
             target.classList.add('active');
             
             // Show/hide ZIP code footer based on active tab
-            if (tab.id === 'map-tab') {
+            if (tab.id === 'map-tab' || tab.id === 'bulk-extract-tab') {
                 zipCodeFooter.classList.add('d-none');
             } else {
                 zipCodeFooter.classList.remove('d-none');
@@ -466,22 +483,42 @@ async function fetchZipData(urls) {
             }
             
             // Check job status
-            const statusUrl = `https://api.firecrawl.dev/v1/extract/${jobId}`;
-            const statusResponse = await fetch(statusUrl, {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${API_KEY}`
+            let statusResult;
+            try {
+                const statusUrl = `https://api.firecrawl.dev/v1/extract/${jobId}`;
+                console.log(`Polling URL: ${statusUrl}`);
+                
+                const statusResponse = await fetch(statusUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${API_KEY}`
+                    }
+                });
+                
+                if (!statusResponse.ok) {
+                    console.warn(`Status check failed with status ${statusResponse.status}. Retrying...`);
+                    console.warn(`Response status: ${statusResponse.status}, statusText: ${statusResponse.statusText}`);
+                    await sleep(POLLING_INTERVAL_MS);
+                    continue;
                 }
-            });
-            
-            if (!statusResponse.ok) {
-                console.warn(`Status check failed with status ${statusResponse.status}. Retrying...`);
+                
+                const responseText = await statusResponse.text();
+                console.log(`Raw polling response (attempt ${attempts}):`, responseText);
+                
+                try {
+                    statusResult = JSON.parse(responseText);
+                    console.log(`Polling attempt ${attempts} result:`, JSON.stringify(statusResult, null, 2));
+                } catch (parseError) {
+                    console.error(`JSON parse error on polling attempt ${attempts}:`, parseError);
+                    console.error('Raw response that failed to parse:', responseText);
+                    await sleep(POLLING_INTERVAL_MS);
+                    continue;
+                }
+            } catch (networkError) {
+                console.error(`Network error during polling attempt ${attempts}:`, networkError);
                 await sleep(POLLING_INTERVAL_MS);
                 continue;
             }
-            
-            const statusResult = await statusResponse.json();
-            console.log('Status check response:', JSON.stringify(statusResult, null, 2));
             
             // Check if the job is complete
             if (statusResult.status === 'completed') {
@@ -910,6 +947,1043 @@ async function fetchWebsiteMap(url) {
         console.error('Map API request failed:', error);
         throw error;
     }
+}
+
+// Find relevant subpages for a given website URL
+async function findRelevantSubpages(baseUrl, maxSubpages = 10) {
+    console.log(`Finding relevant subpages for: ${baseUrl}`);
+    
+    try {
+        // Normalize the base URL to ensure it has a trailing slash if needed
+        let baseUrlObj;
+        try {
+            baseUrlObj = new URL(baseUrl);
+        } catch (e) {
+            // If URL is invalid, try adding https:// prefix
+            baseUrlObj = new URL(`https://${baseUrl}`);
+        }
+        
+        const domain = baseUrlObj.hostname;
+        
+        // Map the website to get all URLs
+        bulkStatus.textContent = `Mapping website: ${domain}...`;
+        const mapData = await fetchWebsiteMap(baseUrl);
+        
+        if (!mapData || !mapData.links || !Array.isArray(mapData.links) || mapData.links.length === 0) {
+            console.warn(`No links found for ${baseUrl}`);
+            return [baseUrl]; // Return only the original URL if mapping fails
+        }
+        
+        // Define patterns for pages likely to contain contact info
+        const relevantPatterns = [
+            /contact/i,
+            /about/i,
+            /location/i,
+            /store/i,
+            /hours/i,
+            /info/i, 
+            /faq/i,
+            /help/i,
+            /company/i,
+            /overview/i,
+            /team/i,
+            /staff/i,
+            /directory/i,
+            /find-us/i,
+            /reach-us/i,
+            /get-in-touch/i
+        ];
+        
+        // Filter to only include links from the same domain
+        const domainLinks = mapData.links.filter(link => {
+            try {
+                const linkUrl = new URL(link);
+                return linkUrl.hostname === domain;
+            } catch (e) {
+                // Handle relative URLs
+                return true; // Assume relative URLs are part of the domain
+            }
+        });
+        
+        // Find relevant subpages based on URL patterns
+        const relevantLinks = domainLinks.filter(link => {
+            // Check if the URL path contains any of our relevant patterns
+            return relevantPatterns.some(pattern => pattern.test(link));
+        });
+        
+        console.log(`Found ${relevantLinks.length} relevant subpages for ${baseUrl}`);
+        
+        // Sort links by relevance (more specific paths first)
+        relevantLinks.sort((a, b) => {
+            // Calculate a relevance score for each link
+            const scoreA = relevantPatterns.reduce((score, pattern) => {
+                return score + (pattern.test(a) ? 1 : 0);
+            }, 0);
+            
+            const scoreB = relevantPatterns.reduce((score, pattern) => {
+                return score + (pattern.test(b) ? 1 : 0);
+            }, 0);
+            
+            // Higher score first, then shorter URLs (less complex paths)
+            if (scoreB !== scoreA) {
+                return scoreB - scoreA;
+            } else {
+                return a.length - b.length;
+            }
+        });
+        
+        // API has a maximum limit of 10 URLs per request
+        // Ensure we don't exceed this limit (original URL + subpages = 10 max)
+        const maxAllowedSubpages = 9; // 9 subpages + 1 original URL = 10 total URLs
+        const adjustedMaxSubpages = Math.min(maxSubpages, maxAllowedSubpages);
+        
+        // Get the top N most relevant links
+        const topRelevantLinks = relevantLinks.slice(0, adjustedMaxSubpages);
+        
+        // Always include the original URL first
+        return [baseUrl, ...topRelevantLinks];
+    } catch (error) {
+        console.error(`Error finding relevant subpages for ${baseUrl}:`, error);
+        return [baseUrl]; // Return only the original URL on error
+    }
+}
+
+// Process bulk URL extraction
+async function processBulkUrls() {
+    // Get URLs from the input field
+    const input = bulkUrlsInput.value.trim();
+    if (!input) {
+        alert('Please enter website URLs to extract data from.');
+        return;
+    }
+    
+    // Parse URLs (comma-separated)
+    const originalUrls = input.split(',').map(url => url.trim()).filter(url => url !== '');
+    
+    if (originalUrls.length === 0) {
+        alert('No valid URLs found.');
+        return;
+    }
+    
+    // Check for URL limit
+    if (originalUrls.length > 50) {
+        alert('Please limit your request to a maximum of 50 URLs.');
+        return;
+    }
+    
+    // Get the extraction prompt
+    const prompt = extractionPromptInput.value.trim();
+    if (!prompt) {
+        alert('Please enter an extraction prompt describing what data to extract.');
+        return;
+    }
+    
+    // Reset and prepare UI
+    bulkResults = [];
+    bulkExtractionComplete = false;
+    
+    // Initialize results for all original URLs with pending status
+    originalUrls.forEach(url => {
+        bulkResults.push({
+            sourceUrl: url,
+            status: 'pending',
+            statusMessage: 'Waiting to process...'
+        });
+    });
+    
+    // Show loading UI
+    if (loadingMessage) {
+        loadingMessage.textContent = 'Extracting data from websites...';
+    }
+    loadingOverlay.classList.remove('d-none');
+    bulkResultsSection.classList.remove('d-none');
+    bulkProgressBar.style.width = '5%';
+    bulkProgressBar.classList.add('progress-bar-animated');
+    
+    // Generate initial results table with pending status
+    generateBulkResultsTable(bulkResults);
+    bulkStatus.textContent = 'Preparing to process URLs...';
+    
+    try {
+        // Process URLs sequentially one original URL at a time
+        for (let i = 0; i < originalUrls.length; i++) {
+            const originalUrl = originalUrls[i];
+            
+            // Calculate progress percentage
+            const progressPercent = 5 + (i / originalUrls.length) * 90;
+            bulkProgressBar.style.width = `${progressPercent}%`;
+            
+            // Update status in the table for this URL
+            bulkResults[i].status = 'processing';
+            bulkResults[i].statusMessage = 'Finding relevant pages...';
+            updateBulkResultsTable(bulkResults);
+            
+            // Step 1: Find relevant subpages for this URL
+            bulkStatus.textContent = `Finding relevant pages for ${originalUrl} (${i+1}/${originalUrls.length})...`;
+            const relevantUrls = await findRelevantSubpages(originalUrl, 10); // Find up to 10 relevant subpages
+            
+            console.log(`Found ${relevantUrls.length} relevant URLs for ${originalUrl}:`);
+            console.log(relevantUrls);
+            
+            // Update status for this URL
+            bulkResults[i].status = 'processing';
+            bulkResults[i].statusMessage = `Extracting data from ${relevantUrls.length} pages...`;
+            updateBulkResultsTable(bulkResults);
+            
+            // Step 2: Process the expanded URL list for this original URL
+            try {
+                bulkStatus.textContent = `Extracting data for ${originalUrl} (${i+1}/${originalUrls.length})...`;
+                
+                // Create an API request with all relevant URLs for this original URL
+                const extractionResponse = await fetchExtendedData(relevantUrls, prompt, originalUrl);
+                console.log(`Extraction response for ${originalUrl}:`, extractionResponse);
+                
+                // Process the result for this original URL
+                if (extractionResponse && extractionResponse.data) {
+                    // Find the data relevant to this original URL
+                    const dataFound = processUrlResult(extractionResponse.data, originalUrl, i);
+                    
+                    if (!dataFound) {
+                        bulkResults[i].status = 'error';
+                        bulkResults[i].statusMessage = 'No matching data found';
+                    }
+                } else {
+                    // Mark URL as failed
+                    bulkResults[i].status = 'error';
+                    bulkResults[i].statusMessage = 'No data returned from API';
+                }
+            } catch (error) {
+                console.error(`Error processing ${originalUrl}:`, error);
+                // Mark URL as failed
+                bulkResults[i].status = 'error';
+                bulkResults[i].statusMessage = `Error: ${error.message}`;
+            }
+            
+            // Update the table after processing
+            updateBulkResultsTable(bulkResults);
+            
+            // Short delay between URLs to avoid rate limiting
+            if (i < originalUrls.length - 1) {
+                await sleep(1000);
+            }
+        }
+        
+        // Processing complete
+        bulkExtractionComplete = true;
+        bulkProgressBar.style.width = '100%';
+        bulkProgressBar.classList.remove('progress-bar-animated');
+        
+        // Count successes and failures
+        const successCount = bulkResults.filter(r => r.status === 'success').length;
+        const errorCount = bulkResults.filter(r => r.status === 'error').length;
+        
+        bulkStatus.textContent = `Extraction complete. Successfully extracted data from ${successCount} of ${originalUrls.length} URLs.`;
+        
+        if (errorCount > 0) {
+            bulkStatus.textContent += ` ${errorCount} URLs failed.`;
+        }
+    } catch (error) {
+        console.error('Error processing bulk URLs:', error);
+        bulkStatus.textContent = `Error: ${error.message}`;
+        bulkStatus.classList.add('text-danger');
+        bulkProgressBar.style.width = '100%';
+        bulkProgressBar.classList.remove('progress-bar-animated');
+    } finally {
+        loadingOverlay.classList.add('d-none');
+    }
+}
+
+// Process results from a batch of URLs
+function processBatchResults(data, batchUrls, batchStartIndex) {
+    // The API response could be in different formats:
+    // 1. Array of objects, each corresponding to a URL
+    // 2. Single object with nested data for all URLs
+    // 3. Single object with properties that need to be mapped to each URL
+    
+    if (Array.isArray(data)) {
+        // Format 1: Array of objects
+        data.forEach((item, idx) => {
+            if (idx < batchUrls.length) {
+                const resultIndex = batchStartIndex + idx;
+                if (resultIndex < bulkResults.length) {
+                    // Check if there's source URL information in the data
+                    let dataSourceUrl = batchUrls[idx]; // Default to the input URL
+                    
+                    // Look for source_url or similar fields in the data
+                    for (const key of Object.keys(item)) {
+                        if (/source.*url|data.*url|found.*url|crawled.*url/i.test(key) && typeof item[key] === 'string') {
+                            dataSourceUrl = item[key];
+                            break;
+                        }
+                    }
+                    
+                    // Add or update dataSourceUrl
+                    bulkResults[resultIndex].dataSourceUrl = dataSourceUrl;
+                    
+                    // Merge the extracted data into the existing result object
+                    Object.assign(bulkResults[resultIndex], item);
+                    bulkResults[resultIndex].status = 'success';
+                    bulkResults[resultIndex].statusMessage = 'Extracted successfully';
+                }
+            }
+        });
+    } else if (typeof data === 'object') {
+        // Try to match data to URLs based on any identifiable information
+        if (batchUrls.length === 1) {
+            // If only one URL in the batch, assign all data to it
+            
+            // Look for source URL information in the data
+            let dataSourceUrl = batchUrls[0]; // Default to the input URL
+            
+            // Check for source URL fields in the data
+            for (const key of Object.keys(data)) {
+                if (/source.*url|data.*url|found.*url|crawled.*url/i.test(key) && typeof data[key] === 'string') {
+                    dataSourceUrl = data[key];
+                    break;
+                }
+            }
+            
+            // Set the data source URL
+            bulkResults[batchStartIndex].dataSourceUrl = dataSourceUrl;
+            
+            // Merge the data
+            Object.assign(bulkResults[batchStartIndex], data);
+            bulkResults[batchStartIndex].status = 'success';
+            bulkResults[batchStartIndex].statusMessage = 'Extracted successfully';
+        } else {
+            // Look for URL-specific data in the object
+            // This is a simplified approach - in real production code, 
+            // we'd need more sophisticated matching logic
+            let dataMatched = false;
+            
+            // Check if the data object has source-related fields that could map to URLs
+            const urlMap = {};
+            
+            // Look for properties that might contain source URL information
+            for (const key in data) {
+                if (key.toLowerCase().includes('url') || 
+                    key.toLowerCase().includes('source') || 
+                    key.toLowerCase().includes('website')) {
+                    
+                    const sourceUrl = data[key];
+                    // Try to find this URL in our batch
+                    const matchIndex = batchUrls.findIndex(url => 
+                        url === sourceUrl || url.includes(sourceUrl) || sourceUrl.includes(url));
+                    
+                    if (matchIndex >= 0) {
+                        urlMap[batchUrls[matchIndex]] = {
+                            data: data,
+                            dataSourceUrl: sourceUrl // Use the actual source URL from the data
+                        };
+                        dataMatched = true;
+                    }
+                }
+            }
+            
+            if (dataMatched) {
+                // Update results based on the URL mapping we found
+                batchUrls.forEach((url, idx) => {
+                    const resultIndex = batchStartIndex + idx;
+                    if (resultIndex < bulkResults.length) {
+                        if (urlMap[url]) {
+                            // Set the data source URL (where the data was found)
+                            bulkResults[resultIndex].dataSourceUrl = urlMap[url].dataSourceUrl;
+                            
+                            // Merge the data
+                            Object.assign(bulkResults[resultIndex], urlMap[url].data);
+                            bulkResults[resultIndex].status = 'success';
+                            bulkResults[resultIndex].statusMessage = 'Extracted successfully';
+                        } else {
+                            bulkResults[resultIndex].status = 'error';
+                            bulkResults[resultIndex].statusMessage = 'No matching data found';
+                        }
+                    }
+                });
+            } else {
+                // If we couldn't match, assume the data applies to the first URL
+                bulkResults[batchStartIndex].dataSourceUrl = batchUrls[0]; // Use the input URL as source
+                Object.assign(bulkResults[batchStartIndex], data);
+                bulkResults[batchStartIndex].status = 'success';
+                bulkResults[batchStartIndex].statusMessage = 'Extracted successfully';
+                
+                // Mark other URLs in batch as failed
+                for (let i = 1; i < batchUrls.length; i++) {
+                    const resultIndex = batchStartIndex + i;
+                    if (resultIndex < bulkResults.length) {
+                        bulkResults[resultIndex].status = 'error';
+                        bulkResults[resultIndex].statusMessage = 'No data returned for this URL';
+                    }
+                }
+            }
+        }
+    } else {
+        // Unexpected response format
+        batchUrls.forEach((url, idx) => {
+            const resultIndex = batchStartIndex + idx;
+            if (resultIndex < bulkResults.length) {
+                bulkResults[resultIndex].status = 'error';
+                bulkResults[resultIndex].statusMessage = 'Invalid response format from API';
+            }
+        });
+    }
+}
+
+// Process extraction results and link them to source URLs
+function processExtractionResults(data, sourceUrls) {
+    // Handle different response formats
+    let processedResults = [];
+    
+    // The response format can vary, so we handle different possibilities
+    if (Array.isArray(data)) {
+        // Format: [item1, item2, ...]
+        // We need to match these up with our source URLs
+        data.forEach((item, index) => {
+            if (index < sourceUrls.length) {
+                processedResults.push({
+                    sourceUrl: sourceUrls[index],
+                    ...item
+                });
+            }
+        });
+    } else if (typeof data === 'object') {
+        // Format: { key1: value1, key2: value2, ... }
+        // Single object response - likely from a single URL
+        processedResults.push({
+            sourceUrl: sourceUrls[0],
+            ...data
+        });
+    }
+    
+    return processedResults;
+}
+
+// Generate the initial results table with all URLs
+function generateBulkResultsTable(results) {
+    // Clear existing table
+    bulkResultsTable.innerHTML = '';
+    
+    if (results.length === 0) {
+        bulkStatus.textContent = 'No URLs to process.';
+        return;
+    }
+    
+    // Determine columns from the results
+    // Initially we just know sourceUrl, dataSourceUrl, status, statusMessage
+    const initialColumns = ['Source URL', 'Data Source URL', 'Status'];
+    
+    // Get all unique data keys from the results to create columns
+    const dataColumns = [...new Set(
+        results.flatMap(result => Object.keys(result)
+            .filter(key => !['sourceUrl', 'status', 'statusMessage'].includes(key))
+        )
+    )];
+    
+    const columns = [...initialColumns, ...dataColumns];
+    
+    // Create the header row
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    
+    columns.forEach(column => {
+        const th = document.createElement('th');
+        th.textContent = column;
+        headerRow.appendChild(th);
+    });
+    
+    thead.appendChild(headerRow);
+    bulkResultsTable.appendChild(thead);
+    
+    // Create the table body
+    const tbody = document.createElement('tbody');
+    tbody.id = 'bulkResultsTableBody'; // Set id for later updates
+    
+    results.forEach((result, index) => {
+        const row = document.createElement('tr');
+        row.id = `bulk-row-${index}`; // Set id for later updates
+        
+        // Add Source URL cell
+        const urlCell = document.createElement('td');
+        urlCell.textContent = result.sourceUrl;
+        row.appendChild(urlCell);
+        
+        // Add Status cell
+        const statusCell = document.createElement('td');
+        statusCell.textContent = result.statusMessage || 'Pending...';
+        
+        // Apply appropriate CSS class based on status
+        if (result.status === 'success') {
+            statusCell.className = 'status-success';
+        } else if (result.status === 'error') {
+            statusCell.className = 'status-error';
+        } else if (result.status === 'processing') {
+            statusCell.className = 'status-processing';
+        } else {
+            statusCell.className = 'status-pending';
+        }
+        
+        row.appendChild(statusCell);
+        
+        // Add placeholders for data columns
+        dataColumns.forEach(column => {
+            const td = document.createElement('td');
+            if (result[column] !== undefined && result[column] !== null) {
+                // Handle different data types appropriately
+                if (typeof result[column] === 'object') {
+                    td.textContent = JSON.stringify(result[column]);
+                } else {
+                    td.textContent = result[column].toString();
+                }
+            } else {
+                td.textContent = '-';
+            }
+            row.appendChild(td);
+        });
+        
+        tbody.appendChild(row);
+    });
+    
+    bulkResultsTable.appendChild(tbody);
+}
+
+// Update existing rows in the bulk results table without regenerating the whole table
+function updateBulkResultsTable(results) {
+    // If table doesn't exist yet, generate it
+    if (!bulkResultsTable.querySelector('thead')) {
+        generateBulkResultsTable(results);
+        return;
+    }
+    
+    // Get the current columns from the table header
+    const headerCells = bulkResultsTable.querySelectorAll('thead th');
+    const existingColumns = Array.from(headerCells).map(th => th.textContent);
+    
+    // Check if we need to update the columns (new data fields might have appeared)
+    const dataColumns = [...new Set(
+        results.flatMap(result => Object.keys(result)
+            .filter(key => !['sourceUrl', 'status', 'statusMessage'].includes(key))
+        )
+    )];
+    
+    const expectedColumns = ['Source URL', 'Status', ...dataColumns];
+    
+    // If columns have changed, regenerate the entire table
+    if (existingColumns.length !== expectedColumns.length || 
+        !expectedColumns.every(col => existingColumns.includes(col))) {
+        generateBulkResultsTable(results);
+        return;
+    }
+    
+    // If columns are the same, just update the existing rows
+    results.forEach((result, index) => {
+        const row = document.getElementById(`bulk-row-${index}`);
+        if (!row) return; // Skip if row doesn't exist
+        
+        const cells = row.querySelectorAll('td');
+        
+    // Add Data Source URL cell if not present
+    if (cells.length >= 2 && !result.dataSourceUrl && result.sourceUrl) {
+        // Default to sourceUrl if dataSourceUrl is not set
+        result.dataSourceUrl = result.sourceUrl;
+    }
+    
+    // Update Data Source URL cell (second cell)
+    if (cells.length >= 2) {
+        cells[1].textContent = result.dataSourceUrl || result.sourceUrl || '-';
+    }
+    
+    // Update Status cell (now the third cell)
+    const statusCell = cells[2];
+        statusCell.textContent = result.statusMessage || 'Pending...';
+        
+        // Update status classes
+        statusCell.className = ''; // Clear existing classes
+        if (result.status === 'success') {
+            statusCell.className = 'status-success';
+        } else if (result.status === 'error') {
+            statusCell.className = 'status-error';
+        } else if (result.status === 'processing') {
+            statusCell.className = 'status-processing';
+        } else {
+            statusCell.className = 'status-pending';
+        }
+        
+        // Update data cells
+        dataColumns.forEach((column, colIndex) => {
+            // Data cells start after Source URL and Status, so add 2
+            const cellIndex = colIndex + 2;
+            
+            if (cellIndex < cells.length) {
+                if (result[column] !== undefined && result[column] !== null) {
+                    // Handle different data types appropriately
+                    if (typeof result[column] === 'object') {
+                        cells[cellIndex].textContent = JSON.stringify(result[column]);
+                    } else {
+                        cells[cellIndex].textContent = result[column].toString();
+                    }
+                } else {
+                    cells[cellIndex].textContent = '-';
+                }
+            }
+        });
+    });
+}
+
+// Fetch data from multiple URLs using the Firecrawl API
+async function fetchBulkData(urls, prompt) {
+    console.log('Making bulk extraction request to Firecrawl for URLs:', urls);
+    console.log('Using prompt:', prompt);
+    
+    try {
+        // Step 1: Submit extraction job
+        console.log('Step 1: Submitting bulk extraction job...');
+        
+        // Create the request body with debugging
+        const requestBody = {
+            urls: urls,
+            prompt: prompt,
+            enableWebSearch: true,  // Enable searching linked pages for data
+            // Simplified - remove agent to test basic functionality
+            timeout: 180           // Increase timeout to 3 minutes
+            // No schema - we want Firecrawl to infer it from the prompt
+        };
+        
+        console.log('REQUEST PAYLOAD:', JSON.stringify(requestBody, null, 2));
+        
+        const jobSubmissionResponse = await fetch('https://api.firecrawl.dev/v1/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEY}`
+            },
+            body: JSON.stringify(requestBody)
+        });
+        
+        if (!jobSubmissionResponse.ok) {
+            const errorText = await jobSubmissionResponse.text();
+            throw new Error(`API job submission failed with status ${jobSubmissionResponse.status}: ${errorText}`);
+        }
+        
+        const jobResponse = await jobSubmissionResponse.json();
+        console.log('Job submission response:', JSON.stringify(jobResponse, null, 2));
+        
+        const jobId = jobResponse.id;
+        if (!jobId) {
+            throw new Error('No job ID returned from API');
+        }
+        
+        // Step 2: Poll for job completion
+        console.log(`Step 2: Polling for job completion (ID: ${jobId})...`);
+        bulkStatus.textContent = 'Processing extraction request...';
+        bulkProgressBar.style.width = '25%';
+        
+        const MAX_POLLING_ATTEMPTS = 20;
+        const POLLING_INTERVAL_MS = 3000;
+        const TOTAL_TIMEOUT_MS = 60000; // 60 second max timeout
+        
+        // Create a polling function that will check status repeatedly
+        async function pollForCompletion() {
+            let attempts = 0;
+            
+            while (attempts < MAX_POLLING_ATTEMPTS) {
+                attempts++;
+                console.log(`Polling attempt ${attempts}/${MAX_POLLING_ATTEMPTS}...`);
+                
+                // Update UI to show progress
+                bulkStatus.textContent = `Checking job status... (attempt ${attempts}/${MAX_POLLING_ATTEMPTS})`;
+                const progressPercent = 25 + (attempts / MAX_POLLING_ATTEMPTS) * 50;
+                bulkProgressBar.style.width = `${progressPercent}%`;
+                
+                try {
+                    // Check job status
+                    const statusUrl = `https://api.firecrawl.dev/v1/extract/${jobId}`;
+                    const statusResponse = await fetch(statusUrl, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${API_KEY}`
+                        }
+                    });
+                    
+                    if (!statusResponse.ok) {
+                        console.warn(`Status check failed with status ${statusResponse.status}. Retrying...`);
+                        await sleep(POLLING_INTERVAL_MS);
+                        continue;
+                    }
+                    
+                    const statusResult = await statusResponse.json();
+                    console.log('Status check response:', JSON.stringify(statusResult, null, 2));
+                    
+                    // Check if the job is complete
+                    if (statusResult.status === 'completed') {
+                        console.log('Job completed successfully!');
+                        return statusResult; // Return the results
+                    } else if (statusResult.status === 'failed') {
+                        throw new Error('Job failed: ' + (statusResult.error || 'Unknown error'));
+                    } else {
+                        console.log(`Job status: ${statusResult.status || 'unknown'}, waiting...`);
+                        await sleep(POLLING_INTERVAL_MS);
+                    }
+                } catch (error) {
+                    console.error('Error during polling:', error);
+                    await sleep(POLLING_INTERVAL_MS);
+                }
+            }
+            
+            // If we get here, polling timed out
+            throw new Error(`Job did not complete after ${MAX_POLLING_ATTEMPTS} polling attempts`);
+        }
+        
+        // Create a timeout promise
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => {
+                reject(new Error(`Job timed out after ${TOTAL_TIMEOUT_MS}ms total wait time`));
+            }, TOTAL_TIMEOUT_MS);
+        });
+        
+        // Race between the polling and timeout
+        let extractionResults;
+        try {
+            extractionResults = await Promise.race([
+                pollForCompletion(),
+                timeoutPromise
+            ]);
+        } catch (error) {
+            console.error('Polling error:', error);
+            
+            // If we time out, create a substitute response with error info
+            if (error.message.includes('timed out')) {
+                extractionResults = {
+                    status: 'completed',
+                    data: {
+                        _timedOut: true,
+                        _jobId: jobId,
+                        _error: error.message,
+                        _message: "Job processing took too long. Results may be incomplete."
+                    }
+                };
+                console.warn('Using fallback results due to timeout:', extractionResults);
+            } else {
+                throw error; // Re-throw other errors
+            }
+        }
+        
+        // Step 3: Return the results
+        bulkStatus.textContent = 'Processing extraction results...';
+        bulkProgressBar.style.width = '85%';
+        console.log('Step 3: Processing extraction results...');
+        return extractionResults;
+    } catch (error) {
+        console.error('API request failed:', error);
+        throw error;
+    }
+}
+
+// Download the bulk extraction results as a CSV file
+function downloadBulkResults() {
+    if (bulkResults.length === 0) {
+        alert('No results to download.');
+        return;
+    }
+    
+    // Get important columns first, then all other data fields
+    const dataKeys = [...new Set(bulkResults.flatMap(obj => Object.keys(obj)))];
+    
+    // Define column order with priority columns first
+    const priorityColumns = ['sourceUrl', 'dataSourceUrl', 'status', 'statusMessage'];
+    const otherColumns = dataKeys.filter(key => 
+        !priorityColumns.includes(key) && 
+        key !== 'sourceUrl' // sourceUrl will be handled separately with a readable header
+    );
+    
+    // Build final columns array with readable names
+    const columns = [
+        { key: 'sourceUrl', header: 'Input URL' },
+        { key: 'dataSourceUrl', header: 'Data Source URL' },
+        ...otherColumns.filter(key => !['status', 'statusMessage'].includes(key))
+            .map(key => ({ key, header: key.charAt(0).toUpperCase() + key.slice(1) }))
+    ];
+    
+    // Create CSV header row
+    let csvContent = columns.map(col => `"${col.header}"`).join(',') + '\n';
+    
+    // Add data rows
+    bulkResults.forEach(result => {
+        const rowData = [];
+        
+        // Process each column
+        columns.forEach(column => {
+            const key = column.key;
+            let value = result[key];
+            
+            // Handle special case for dataSourceUrl if not present
+            if (key === 'dataSourceUrl' && (value === undefined || value === null)) {
+                value = result.sourceUrl; // Default to input URL if data source URL is not available
+            }
+            
+            // Format the value for CSV
+            if (value === undefined || value === null) {
+                rowData.push('""'); // Empty quoted field
+            } else if (typeof value === 'object') {
+                // For object values, convert to JSON and quote
+                rowData.push(`"${JSON.stringify(value).replace(/"/g, '""')}"`);
+            } else {
+                // For simple values, convert to string and quote
+                const strValue = value.toString();
+                // Double up quotes inside fields to escape them
+                rowData.push(`"${strValue.replace(/"/g, '""')}"`);
+            }
+        });
+        
+        // Join all values with commas
+        const row = rowData.join(',');
+        
+        csvContent += row + '\n';
+    });
+    
+    console.log('Downloading CSV with content:', csvContent);
+    
+    // Create a blob and download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'bulk_extraction_results.csv');
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+// Fetch data for an extended set of URLs related to one original URL
+async function fetchExtendedData(allUrls, prompt, originalUrl) {
+    console.log(`Making enhanced extraction request for ${originalUrl} with ${allUrls.length} URLs:`, allUrls);
+    
+    try {
+        // Submit extraction job
+        bulkStatus.textContent = `Submitting extraction job for ${originalUrl}...`;
+        
+        // Create the request body
+        const requestBody = {
+            urls: allUrls,
+            prompt: prompt,
+            enableWebSearch: false, // Not needed since we're explicitly providing the URLs to check
+            timeout: 300           // 5 minute timeout for extended processing
+        };
+        
+        console.log('EXTENDED REQUEST PAYLOAD:', JSON.stringify(requestBody, null, 2));
+        
+        const jobSubmissionResponse = await fetch('https://api.firecrawl.dev/v1/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEY}`
+            },
+            body: JSON.stringify(requestBody)
+        });
+        
+        if (!jobSubmissionResponse.ok) {
+            const errorText = await jobSubmissionResponse.text();
+            throw new Error(`API job submission failed with status ${jobSubmissionResponse.status}: ${errorText}`);
+        }
+        
+        const jobResponse = await jobSubmissionResponse.json();
+        console.log(`Job submission response for ${originalUrl}:`, JSON.stringify(jobResponse, null, 2));
+        
+        const jobId = jobResponse.id;
+        if (!jobId) {
+            throw new Error('No job ID returned from API');
+        }
+        
+        // Poll for job completion
+        console.log(`Polling for job completion (ID: ${jobId})...`);
+        
+        // Polling settings
+        const MAX_POLLING_ATTEMPTS = 40; // 2 minutes at 3-second intervals
+        const POLLING_INTERVAL_MS = 3000;
+        const TOTAL_TIMEOUT_MS = 180000; // 3 minute overall timeout
+        
+        // Create a polling function
+        async function pollForCompletion() {
+            let attempts = 0;
+            
+            while (attempts < MAX_POLLING_ATTEMPTS) {
+                attempts++;
+                console.log(`Polling attempt ${attempts}/${MAX_POLLING_ATTEMPTS} for ${originalUrl}...`);
+                
+                bulkStatus.textContent = `Processing ${originalUrl}... (attempt ${attempts}/${MAX_POLLING_ATTEMPTS})`;
+                
+                try {
+                    // Check job status
+                    const statusUrl = `https://api.firecrawl.dev/v1/extract/${jobId}`;
+                    const statusResponse = await fetch(statusUrl, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${API_KEY}`
+                        }
+                    });
+                    
+                    if (!statusResponse.ok) {
+                        console.warn(`Status check failed with status ${statusResponse.status}. Retrying...`);
+                        await sleep(POLLING_INTERVAL_MS);
+                        continue;
+                    }
+                    
+                    const statusResult = await statusResponse.json();
+                    
+                    // Check if the job is complete
+                    if (statusResult.status === 'completed') {
+                        console.log(`Job for ${originalUrl} completed successfully!`);
+                        return statusResult; // Return the results
+                    } else if (statusResult.status === 'failed') {
+                        throw new Error('Job failed: ' + (statusResult.error || 'Unknown error'));
+                    } else {
+                        console.log(`Job status: ${statusResult.status || 'unknown'}, waiting...`);
+                        await sleep(POLLING_INTERVAL_MS);
+                    }
+                } catch (error) {
+                    console.error('Error during polling:', error);
+                    await sleep(POLLING_INTERVAL_MS);
+                }
+            }
+            
+            // If we get here, polling timed out
+            throw new Error(`Job for ${originalUrl} did not complete after ${MAX_POLLING_ATTEMPTS} polling attempts`);
+        }
+        
+        // Create a timeout promise
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => {
+                reject(new Error(`Job for ${originalUrl} timed out after ${TOTAL_TIMEOUT_MS}ms total wait time`));
+            }, TOTAL_TIMEOUT_MS);
+        });
+        
+        // Race between the polling and timeout
+        let extractionResults;
+        try {
+            extractionResults = await Promise.race([
+                pollForCompletion(),
+                timeoutPromise
+            ]);
+        } catch (error) {
+            console.error(`Polling error for ${originalUrl}:`, error);
+            
+            // If we time out, create a substitute response with error info
+            if (error.message.includes('timed out')) {
+                extractionResults = {
+                    status: 'completed',
+                    data: {
+                        _timedOut: true,
+                        _jobId: jobId,
+                        _error: error.message,
+                        _message: "Job processing took too long. Results may be incomplete."
+                    }
+                };
+                console.warn('Using fallback results due to timeout:', extractionResults);
+            } else {
+                throw error; // Re-throw other errors
+            }
+        }
+        
+        // Return the results
+        return extractionResults;
+    } catch (error) {
+        console.error(`API request failed for ${originalUrl}:`, error);
+        throw error;
+    }
+}
+
+// Process results for a single original URL
+function processUrlResult(data, originalUrl, resultIndex) {
+    console.log(`Processing result for ${originalUrl}:`, data);
+    
+    // Initialize flag indicating whether we found any data
+    let dataFound = false;
+    
+    // Handle different data formats
+    if (Array.isArray(data)) {
+        // Format 1: Array of objects
+        // Find the most data-rich result (containing the most fields)
+        let bestResult = null;
+        let maxFields = 0;
+        
+        data.forEach(item => {
+            const fieldCount = Object.keys(item).filter(key => 
+                key !== 'status' && 
+                key !== 'statusMessage' && 
+                item[key] !== null && 
+                item[key] !== undefined &&
+                item[key] !== ''
+            ).length;
+            
+            if (fieldCount > maxFields) {
+                bestResult = item;
+                maxFields = fieldCount;
+            }
+        });
+        
+        if (bestResult) {
+            // Find source URL in the best result
+            let dataSourceUrl = originalUrl; // Default to original URL
+            
+            // Look for source URL field in the data
+            for (const key of Object.keys(bestResult)) {
+                // Check for source_url or similar fields
+                if (/source.*url|data.*url|found.*url|crawled.*url/i.test(key) && typeof bestResult[key] === 'string') {
+                    dataSourceUrl = bestResult[key];
+                    break;
+                }
+            }
+            
+            // Update the result with the found data and source URL
+            bulkResults[resultIndex].dataSourceUrl = dataSourceUrl;
+            Object.assign(bulkResults[resultIndex], bestResult);
+            bulkResults[resultIndex].status = 'success';
+            bulkResults[resultIndex].statusMessage = 'Extracted successfully';
+            
+            dataFound = true;
+        }
+    } else if (typeof data === 'object' && data !== null) {
+        // Format 2: Single object
+        
+        // Check if this is our "not found" placeholder and skip it
+        if (data._timedOut || data._error) {
+            bulkResults[resultIndex].status = 'error';
+            bulkResults[resultIndex].statusMessage = data._message || 'Extraction timed out';
+            return false;
+        }
+        
+        // Extract data source URL
+        let dataSourceUrl = originalUrl; // Default to original URL
+        
+        // Look for source URL field in the data
+        for (const key of Object.keys(data)) {
+            // Check for source_url or similar fields
+            if (/source.*url|data.*url|found.*url|crawled.*url/i.test(key) && typeof data[key] === 'string') {
+                dataSourceUrl = data[key];
+                break;
+            }
+        }
+        
+        // Check if we have any actual data fields (excluding metadata)
+        const dataFields = Object.keys(data).filter(key => 
+            !['status', 'statusMessage', 'sourceUrl', '_timedOut', '_error', '_message', '_jobId'].includes(key) &&
+            data[key] !== null && 
+            data[key] !== undefined &&
+            data[key] !== ''
+        );
+        
+        if (dataFields.length > 0) {
+            // Update the result with the found data and source URL
+            bulkResults[resultIndex].dataSourceUrl = dataSourceUrl;
+            Object.assign(bulkResults[resultIndex], data);
+            bulkResults[resultIndex].status = 'success';
+            bulkResults[resultIndex].statusMessage = 'Extracted successfully';
+            
+            dataFound = true;
+        }
+    }
+    
+    return dataFound;
 }
 
 // Download the map results as a CSV file
