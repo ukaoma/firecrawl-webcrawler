@@ -38,6 +38,23 @@ const bulkResultsTable = document.getElementById('bulkResultsTable');
 const bulkResultsTableBody = document.getElementById('bulkResultsTableBody');
 const downloadBulkResultsButton = document.getElementById('downloadBulkResultsButton');
 
+// Knowledge Base Feature DOM Elements
+const kbUrlsInput = document.getElementById('kbUrlsInput');
+const processKbUrlsButton = document.getElementById('processKbUrlsButton');
+const kbResultsSection = document.getElementById('kbResultsSection');
+const kbProgressBar = document.getElementById('kbProgressBar');
+const kbStatus = document.getElementById('kbStatus');
+const kbResultsTable = document.getElementById('kbResultsTable');
+const kbResultsTableBody = document.getElementById('kbResultsTableBody');
+const downloadKbResultsButton = document.getElementById('downloadKbResultsButton');
+const kbGlobalProgressBar = document.getElementById('kbGlobalProgressBar');
+const kbGlobalProgressText = document.getElementById('kbGlobalProgressText');
+const kbGlobalProgressPercentage = document.getElementById('kbGlobalProgressPercentage');
+const kbGlobalStatusStats = document.getElementById('kbGlobalStatusStats');
+const kbElapsedTime = document.getElementById('kbElapsedTime');
+const kbEstimatedTime = document.getElementById('kbEstimatedTime');
+const kbCurrentProgressPercentage = document.getElementById('kbCurrentProgressPercentage');
+
 // Global Progress Tracking Elements
 const globalProgressBar = document.getElementById('globalProgressBar');
 const globalProgressText = document.getElementById('globalProgressText');
@@ -64,6 +81,15 @@ let totalUrlsToProcess = 0;
 let urlProcessingTimes = [];
 let globalProgressTimer = null;
 
+// Knowledge Base Global Variables
+let kbResults = [];
+let kbExtractionComplete = false;
+let kbExtractionStartTime = null;
+let processedArticleCount = 0;
+let totalArticlesToProcess = 0;
+let articleProcessingTimes = [];
+let kbProgressTimer = null;
+
 // Initialize the page
 document.addEventListener('DOMContentLoaded', () => {
     // Set up event listeners
@@ -74,6 +100,8 @@ document.addEventListener('DOMContentLoaded', () => {
     downloadUrlsButton.addEventListener('click', downloadMapResults);
     processBulkUrlsButton.addEventListener('click', processBulkUrls);
     downloadBulkResultsButton.addEventListener('click', downloadBulkResults);
+    processKbUrlsButton.addEventListener('click', processKbUrls);
+    downloadKbResultsButton.addEventListener('click', downloadKbResults);
     
     // Initialize Bootstrap tabs
     const tabElements = document.querySelectorAll('a[data-bs-toggle="tab"]');
@@ -1284,26 +1312,14 @@ async function fetchWebsiteMap(url) {
     console.log(`Fetching website map for: ${url}`);
     
     try {
-        const response = await fetch('https://api.firecrawl.dev/v1/extract', {
+        const response = await fetch('https://api.firecrawl.dev/v1/map', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${API_KEY}`
             },
             body: JSON.stringify({
-                urls: [url],
-                prompt: "Extract all URLs from this website. Include both internal and external links.",
-                schema: {
-                    type: "object",
-                    properties: {
-                        links: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    }
-                }
+                url: url
             })
         });
         
@@ -1417,9 +1433,25 @@ async function processWebsiteMap() {
         // Update progress
         mapProgressBar.style.width = '50%';
         
-        // Process the mapped URLs - the API returns 'links' not 'urls'
+        // Process the mapped URLs - check different possible response formats
+        let allUrls = [];
+        
+        // Check various possible locations for URLs in the response
         if (mapData && mapData.links && Array.isArray(mapData.links)) {
-            const allUrls = mapData.links;
+            // Format from v1/extract: { links: [...] }
+            allUrls = mapData.links;
+        } else if (mapData && mapData.urls && Array.isArray(mapData.urls)) {
+            // Possible format from v1/map: { urls: [...] }
+            allUrls = mapData.urls;
+        } else if (mapData && Array.isArray(mapData)) {
+            // Possible format from v1/map: direct array of URLs
+            allUrls = mapData;
+        } else if (mapData && mapData.results && Array.isArray(mapData.results)) {
+            // Another possible format: { results: [...] }
+            allUrls = mapData.results;
+        }
+        
+        if (allUrls.length > 0) {
             
             // Fetch homepage links for ranking
             mapStatus.textContent = 'Analyzing homepage links for ranking...';
@@ -1536,6 +1568,488 @@ function downloadMapResults() {
     const link = document.createElement('a');
     link.setAttribute('href', url);
     link.setAttribute('download', 'mapped_urls.txt');
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+// Process knowledge base articles extraction
+async function processKbUrls() {
+    // Get URLs from input
+    const urlsInput = kbUrlsInput.value.trim();
+    
+    if (!urlsInput) {
+        alert('Please enter article URLs to extract.');
+        return;
+    }
+    
+    // Parse URLs (split by commas or newlines)
+    const urls = urlsInput.split(/[\n,]+/).map(url => url.trim()).filter(url => url !== '');
+    
+    if (urls.length === 0) {
+        alert('No valid URLs found.');
+        return;
+    }
+    
+    // Show the results section
+    kbResultsSection.classList.remove('d-none');
+    
+    // Clear previous results
+    kbResultsTableBody.innerHTML = '';
+    kbProgressBar.style.width = '0%';
+    kbProgressBar.classList.add('progress-bar-animated');
+    kbStatus.textContent = 'Preparing knowledge base extraction...';
+    kbCurrentProgressPercentage.textContent = '0%';
+    
+    // Reset global variables
+    kbResults = [];
+    kbExtractionComplete = false;
+    
+    // Show loading UI with extraction message
+    if (loadingMessage) {
+        loadingMessage.textContent = 'Extracting knowledge base articles...';
+    }
+    loadingOverlay.classList.remove('d-none');
+    
+    // Start KB progress tracking
+    startKbProgressTracking(urls.length);
+    
+    try {
+        // Process each URL sequentially
+        for (let i = 0; i < urls.length; i++) {
+            const url = urls[i];
+            const articleStartTime = Date.now();
+            
+            // Update UI to show which URL we're processing
+            kbStatus.textContent = `Processing article ${i+1} of ${urls.length}: ${url}`;
+            
+            try {
+                // Process this article URL
+                await processKbArticle(url, i+1, urls.length);
+                
+                // Calculate processing time for this article
+                const articleProcessingTime = Date.now() - articleStartTime;
+                
+                // Update global progress
+                updateKbProgress(true, articleProcessingTime);
+                
+            } catch (error) {
+                console.error(`Error processing article ${url}:`, error);
+                
+                // Add error result to the table
+                addKbResult({
+                    url: url,
+                    category: '',
+                    article_name: '',
+                    published_date: '',
+                    content: [],
+                    error: error.message,
+                    status: 'error'
+                });
+                
+                // Calculate processing time for this article (even though it failed)
+                const articleProcessingTime = Date.now() - articleStartTime;
+                
+                // Update global progress
+                updateKbProgress(false, articleProcessingTime);
+            }
+            
+            // Short delay between URLs to avoid rate limiting
+            if (i < urls.length - 1) {
+                await sleep(1000);
+            }
+        }
+        
+        // Processing complete
+        kbExtractionComplete = true;
+        kbProgressBar.style.width = '100%';
+        kbProgressBar.classList.remove('progress-bar-animated');
+        kbStatus.textContent = `Extraction complete. ${kbResults.filter(r => r.status === 'success').length} of ${urls.length} articles processed successfully.`;
+        kbCurrentProgressPercentage.textContent = '100%';
+        
+    } catch (error) {
+        console.error('Error in knowledge base processing:', error);
+        kbStatus.textContent = `Error: ${error.message}`;
+        kbStatus.classList.add('text-danger');
+    } finally {
+        loadingOverlay.classList.add('d-none');
+    }
+}
+
+// Process a single knowledge base article
+async function processKbArticle(url, currentIndex, totalArticles) {
+    try {
+        // Update progress for this article
+        kbProgressBar.style.width = '10%';
+        kbCurrentProgressPercentage.textContent = '10%';
+        
+        // Prepare the schema for knowledge base article extraction
+        const articleSchema = {
+            type: "object",
+            properties: {
+                category: { type: "string" },
+                article_name: { type: "string" },
+                published_date: { type: "string" },
+                content: { 
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            type: { type: "string" },  // can be "heading", "text", "image"
+                            content: { type: "string" },
+                            is_bold: { type: "boolean", nullable: true },
+                            level: { type: "number", nullable: true }, // for headings
+                            image_url: { type: "string", nullable: true }
+                        }
+                    }
+                }
+            },
+            required: ["category", "article_name", "published_date", "content"]
+        };
+        
+        const prompt = "Extract the following from this knowledge base article (ignore related/trending articles): the article's category/section, title, published date, and all main content. For the content, preserve the structure with headings, text paragraphs (noting if text is bold), and images. Return this as structured data.";
+        
+        kbStatus.textContent = `Submitting extraction job for article ${currentIndex} of ${totalArticles}...`;
+        kbProgressBar.style.width = '20%';
+        kbCurrentProgressPercentage.textContent = '20%';
+        
+        console.log(`Extracting knowledge base article from: ${url}`);
+        console.log(`Using schema:`, articleSchema);
+        
+        // Call the Firecrawl API to extract article data
+        const jobSubmissionResponse = await fetch('https://api.firecrawl.dev/v1/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEY}`
+            },
+            body: JSON.stringify({
+                urls: [url],
+                prompt: prompt,
+                schema: articleSchema
+            })
+        });
+        
+        if (!jobSubmissionResponse.ok) {
+            const errorText = await jobSubmissionResponse.text();
+            throw new Error(`API job submission failed with status ${jobSubmissionResponse.status}: ${errorText}`);
+        }
+        
+        const jobResponse = await jobSubmissionResponse.json();
+        console.log('Job submission response:', JSON.stringify(jobResponse, null, 2));
+        
+        const jobId = jobResponse.id;
+        if (!jobId) {
+            throw new Error('No job ID returned from API');
+        }
+        
+        // Poll for job completion
+        kbStatus.textContent = `Extracting article ${currentIndex} of ${totalArticles}...`;
+        kbProgressBar.style.width = '50%';
+        kbCurrentProgressPercentage.textContent = '50%';
+        
+        // Set up polling with higher limits for complex articles
+        const MAX_POLLING_ATTEMPTS = 30;
+        const POLLING_INTERVAL_MS = 2500;
+        
+        let attempts = 0;
+        let jobComplete = false;
+        let extractionResults = null;
+        
+        while (!jobComplete && attempts < MAX_POLLING_ATTEMPTS) {
+            attempts++;
+            console.log(`Polling attempt ${attempts}/${MAX_POLLING_ATTEMPTS} for article ${url}...`);
+            
+            // Update progress based on polling progress
+            const pollingProgress = 50 + (attempts / MAX_POLLING_ATTEMPTS) * 40;
+            kbProgressBar.style.width = `${pollingProgress}%`;
+            kbCurrentProgressPercentage.textContent = `${Math.round(pollingProgress)}%`;
+            
+            kbStatus.textContent = `Checking extraction status for article ${currentIndex}... (attempt ${attempts}/${MAX_POLLING_ATTEMPTS})`;
+            
+            // Check job status
+            let statusResult;
+            try {
+                const statusResponse = await fetch(`https://api.firecrawl.dev/v1/extract/${jobId}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${API_KEY}`
+                    }
+                });
+                
+                if (!statusResponse.ok) {
+                    await sleep(POLLING_INTERVAL_MS);
+                    continue;
+                }
+                
+                statusResult = await statusResponse.json();
+            } catch (networkError) {
+                console.error(`Network error during polling for article ${url}:`, networkError);
+                await sleep(POLLING_INTERVAL_MS);
+                continue;
+            }
+            
+            // Check if the job is complete
+            if (statusResult.status === 'completed') {
+                console.log(`Job completed successfully for article ${url}!`);
+                jobComplete = true;
+                extractionResults = statusResult;
+                break;
+            } else if (statusResult.status === 'failed') {
+                throw new Error('Job failed: ' + (statusResult.error || 'Unknown error'));
+            } else {
+                console.log(`Job status for article ${url}: ${statusResult.status || 'unknown'}, waiting...`);
+                await sleep(POLLING_INTERVAL_MS);
+            }
+        }
+        
+        if (!jobComplete) {
+            throw new Error(`Job did not complete after ${MAX_POLLING_ATTEMPTS} polling attempts`);
+        }
+        
+        kbStatus.textContent = `Extraction complete for article ${currentIndex}. Processing results...`;
+        kbProgressBar.style.width = '90%';
+        kbCurrentProgressPercentage.textContent = '90%';
+        
+        // Get the extracted data
+        let articleData;
+        
+        if (extractionResults && extractionResults.data) {
+            articleData = extractionResults.data;
+            console.log('Extracted article data:', articleData);
+            
+            // Add to results
+            addKbResult({
+                url: url,
+                category: articleData.category || '',
+                article_name: articleData.article_name || '',
+                published_date: articleData.published_date || '',
+                content: articleData.content || [],
+                status: 'success'
+            });
+            
+            return true;
+        } else {
+            console.warn(`No data field in extraction results for article ${url}:`, extractionResults);
+            
+            // Add to results with error
+            addKbResult({
+                url: url,
+                category: '',
+                article_name: '',
+                published_date: '',
+                content: [],
+                error: 'No content extracted',
+                status: 'error'
+            });
+            
+            return false;
+        }
+    } catch (error) {
+        console.error(`API request failed for article ${url}:`, error);
+        throw error;
+    }
+}
+
+// Add a knowledge base result to the table
+function addKbResult(result) {
+    // Add to the results array
+    kbResults.push(result);
+    
+    // Add a row to the table
+    const row = document.createElement('tr');
+    
+    // URL cell
+    const urlCell = document.createElement('td');
+    urlCell.textContent = result.url;
+    row.appendChild(urlCell);
+    
+    // Category cell
+    const categoryCell = document.createElement('td');
+    categoryCell.textContent = result.category || '-';
+    row.appendChild(categoryCell);
+    
+    // Article Name cell
+    const nameCell = document.createElement('td');
+    nameCell.textContent = result.article_name || '-';
+    row.appendChild(nameCell);
+    
+    // Published Date cell
+    const dateCell = document.createElement('td');
+    dateCell.textContent = result.published_date || '-';
+    row.appendChild(dateCell);
+    
+    // Content Preview cell
+    const contentCell = document.createElement('td');
+    if (result.status === 'success' && result.content && result.content.length > 0) {
+        // Create a preview of the content
+        const contentPreview = result.content.slice(0, 3).map(item => {
+            if (item.type === 'heading') {
+                return `<strong>${item.content}</strong>`;
+            } else if (item.type === 'text') {
+                return item.is_bold ? `<b>${item.content.substring(0, 50)}${item.content.length > 50 ? '...' : ''}</b>` : 
+                    `${item.content.substring(0, 50)}${item.content.length > 50 ? '...' : ''}`;
+            } else if (item.type === 'image') {
+                return `<em>[Image: ${item.image_url ? item.image_url.substring(0, 30) + '...' : 'no URL'}]</em>`;
+            }
+            return '';
+        }).join('<br>');
+        
+        contentCell.innerHTML = contentPreview + (result.content.length > 3 ? '<br>...' : '');
+    } else {
+        contentCell.textContent = '-';
+    }
+    row.appendChild(contentCell);
+    
+    // Status cell
+    const statusCell = document.createElement('td');
+    if (result.status === 'success') {
+        statusCell.textContent = 'Success';
+        statusCell.classList.add('text-success');
+    } else {
+        statusCell.textContent = 'Error';
+        statusCell.classList.add('text-danger');
+        statusCell.setAttribute('title', result.error || 'Unknown error');
+    }
+    row.appendChild(statusCell);
+    
+    // Add the row to the table
+    kbResultsTableBody.appendChild(row);
+}
+
+// Start knowledge base progress tracking
+function startKbProgressTracking(totalArticles) {
+    kbExtractionStartTime = Date.now();
+    totalArticlesToProcess = totalArticles;
+    processedArticleCount = 0;
+    articleProcessingTimes = [];
+    
+    // Reset UI
+    kbGlobalProgressBar.style.width = '0%';
+    kbGlobalProgressPercentage.textContent = '0%';
+    kbGlobalStatusStats.textContent = `Processing 0 of ${totalArticles} articles`;
+    kbElapsedTime.textContent = 'Elapsed: 0s';
+    kbEstimatedTime.textContent = 'Est. remaining: --';
+    
+    // Start the timer to update elapsed time
+    if (kbProgressTimer) {
+        clearInterval(kbProgressTimer);
+    }
+    
+    kbProgressTimer = setInterval(() => {
+        if (!kbExtractionStartTime) return;
+        
+        // Update elapsed time
+        const elapsed = Date.now() - kbExtractionStartTime;
+        kbElapsedTime.textContent = `Elapsed: ${formatTime(elapsed)}`;
+        
+        // Calculate estimated remaining time if we have at least one article processed
+        if (processedArticleCount > 0 && articleProcessingTimes.length > 0) {
+            // Calculate average time per article
+            const avgTimePerArticle = articleProcessingTimes.reduce((a, b) => a + b, 0) / articleProcessingTimes.length;
+            
+            // Estimate remaining time
+            const remainingArticles = totalArticlesToProcess - processedArticleCount;
+            const estimatedRemainingTime = avgTimePerArticle * remainingArticles;
+            
+            kbEstimatedTime.textContent = `Est. remaining: ${formatTime(estimatedRemainingTime)}`;
+        }
+    }, 1000);
+}
+
+// Update KB progress when an article is processed
+function updateKbProgress(success = true, processingTime = null) {
+    if (!kbExtractionStartTime) return;
+    
+    processedArticleCount++;
+    
+    // Record processing time for this article
+    if (processingTime) {
+        articleProcessingTimes.push(processingTime);
+    }
+    
+    // Calculate and update progress percentage
+    const progressPercent = Math.round((processedArticleCount / totalArticlesToProcess) * 100);
+    kbGlobalProgressBar.style.width = `${progressPercent}%`;
+    kbGlobalProgressPercentage.textContent = `${progressPercent}%`;
+    
+    // Update status text
+    kbGlobalStatusStats.textContent = `Processing ${processedArticleCount} of ${totalArticlesToProcess} articles`;
+    
+    // Check if we're done
+    if (processedArticleCount >= totalArticlesToProcess) {
+        finishKbProgress();
+    }
+}
+
+// End KB progress tracking
+function finishKbProgress() {
+    if (kbProgressTimer) {
+        clearInterval(kbProgressTimer);
+        kbProgressTimer = null;
+    }
+    
+    // Calculate final stats
+    if (kbExtractionStartTime) {
+        const totalTime = Date.now() - kbExtractionStartTime;
+        kbElapsedTime.textContent = `Total time: ${formatTime(totalTime)}`;
+        kbEstimatedTime.textContent = `Avg. per article: ${formatTime(totalTime / totalArticlesToProcess)}`;
+        
+        // Show success percentage
+        const successCount = kbResults.filter(r => r.status === 'success').length;
+        const successRate = Math.round((successCount / totalArticlesToProcess) * 100);
+        kbGlobalStatusStats.textContent = `Completed: ${successCount} of ${totalArticlesToProcess} articles (${successRate}% success)`;
+    }
+    
+    kbExtractionStartTime = null;
+}
+
+// Download KB results as a CSV file
+function downloadKbResults() {
+    if (kbResults.length === 0) {
+        alert('No results to download.');
+        return;
+    }
+    
+    // Define CSV headers
+    const headers = ['URL', 'Category', 'Article Name', 'Published Date', 'Content', 'Status', 'Error'];
+    
+    // Create CSV content
+    let csvContent = headers.join(',') + '\n';
+    
+    // Add each result as a row
+    kbResults.forEach(result => {
+        // Format content as JSON string to preserve structure
+        let contentStr = '';
+        if (result.content && result.content.length > 0) {
+            try {
+                contentStr = JSON.stringify(result.content).replace(/"/g, '""');
+            } catch (e) {
+                contentStr = 'Error serializing content';
+            }
+        }
+        
+        const row = [
+            `"${result.url.replace(/"/g, '""')}"`,
+            `"${(result.category || '').replace(/"/g, '""')}"`,
+            `"${(result.article_name || '').replace(/"/g, '""')}"`,
+            `"${(result.published_date || '').replace(/"/g, '""')}"`,
+            `"${contentStr}"`,
+            result.status === 'success' ? 'Success' : 'Error',
+            result.status === 'error' ? `"${(result.error || 'Unknown error').replace(/"/g, '""')}"` : ''
+        ];
+        
+        csvContent += row.join(',') + '\n';
+    });
+    
+    // Create a blob and download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'knowledge_base_extraction.csv');
     link.style.display = 'none';
     
     document.body.appendChild(link);

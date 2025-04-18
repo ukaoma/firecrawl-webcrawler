@@ -702,26 +702,14 @@ async function fetchWebsiteMap(url) {
     console.log(`Fetching website map for: ${url}`);
     
     try {
-        const response = await fetch('https://api.firecrawl.dev/v1/extract', {
+        const response = await fetch('https://api.firecrawl.dev/v1/map', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${API_KEY}`
             },
             body: JSON.stringify({
-                urls: [url],
-                prompt: "Extract all URLs from this website. Include both internal and external links.",
-                schema: {
-                    type: "object",
-                    properties: {
-                        links: {
-                            type: "array",
-                            items: {
-                                type: "string"
-                            }
-                        }
-                    }
-                }
+                url: url
             })
         });
         
@@ -792,78 +780,110 @@ async function fetchHomepageLinks(url) {
     }
 }
 
-// Rank URLs by importance
-function rankUrlsByImportance(urls, homepageLinks, baseUrl) {
-    // Parse the base URL to get the domain
-    let baseDomain;
-    try {
-        const parsedUrl = new URL(baseUrl);
-        baseDomain = parsedUrl.hostname;
-    } catch (e) {
-        console.error('Error parsing base URL:', e);
-        baseDomain = baseUrl;
-    }
+// Process website mapping
+async function processWebsiteMap() {
+    // Get website URL
+    const url = websiteUrlInput.value.trim();
     
-    // Define scoring criteria
-    const scores = {};
-    
-    // Initialize scores
-    urls.forEach(url => {
-        scores[url] = 0;
-    });
-    
-    // Score 1: URLs directly linked from homepage get higher priority
-    homepageLinks.forEach(link => {
-        if (scores[link] !== undefined) {
-            scores[link] += 10;
-        }
-    });
-    
-    // Score 2: Internal URLs get higher priority than external
-    urls.forEach(url => {
-        try {
-            const parsedUrl = new URL(url);
-            if (parsedUrl.hostname === baseDomain) {
-                scores[url] += 5;
-            }
-        } catch (e) {
-            // Invalid URL, don't change score
-        }
-    });
-    
-    // Score 3: Shorter URLs (closer to root) get higher priority
-    urls.forEach(url => {
-        try {
-            const parsedUrl = new URL(url);
-            const pathDepth = parsedUrl.pathname.split('/').filter(Boolean).length;
-            scores[url] += Math.max(5 - pathDepth, 0); // Higher score for shorter paths
-        } catch (e) {
-            // Invalid URL, don't change score
-        }
-    });
-    
-    // Sort URLs by score (descending)
-    return [...urls].sort((a, b) => scores[b] - scores[a]);
-}
-
-// Download the mapped URLs as a text file
-function downloadMapResults() {
-    const content = mapResults.textContent;
-    
-    if (!content) {
-        alert('No URLs to download.');
+    if (!url) {
+        alert('Please enter a website URL to map.');
         return;
     }
     
-    // Create a blob and download link
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'mapped_urls.txt');
-    link.style.display = 'none';
+    // Validate URL format
+    try {
+        new URL(url); // This will throw an error if the URL is invalid
+    } catch (e) {
+        alert('Please enter a valid URL (including http:// or https://)');
+        return;
+    }
     
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Show the results section
+    mapResultsSection.classList.remove('d-none');
+    
+    // Clear previous results
+    mapResults.textContent = '';
+    mapStatus.textContent = 'Starting website mapping...';
+    mapProgressBar.style.width = '10%';
+    mapProgressBar.classList.add('progress-bar-animated');
+    urlCount.textContent = '0';
+    
+    // Show loading UI with website mapping message
+    if (loadingMessage) {
+        loadingMessage.textContent = 'Mapping website URLs...';
+    }
+    loadingOverlay.classList.remove('d-none');
+    
+    try {
+        // Map the website
+        mapStatus.textContent = 'Fetching all website URLs...';
+        const mapData = await fetchWebsiteMap(url);
+        console.log('Received map data:', mapData);
+        
+        // Update progress
+        mapProgressBar.style.width = '50%';
+        
+        // Process the mapped URLs - check different possible response formats
+        let allUrls = [];
+        
+        // Check various possible locations for URLs in the response
+        if (mapData && mapData.links && Array.isArray(mapData.links)) {
+            // Format from v1/extract: { links: [...] }
+            allUrls = mapData.links;
+        } else if (mapData && mapData.urls && Array.isArray(mapData.urls)) {
+            // Possible format from v1/map: { urls: [...] }
+            allUrls = mapData.urls;
+        } else if (mapData && Array.isArray(mapData)) {
+            // Possible format from v1/map: direct array of URLs
+            allUrls = mapData;
+        } else if (mapData && mapData.results && Array.isArray(mapData.results)) {
+            // Another possible format: { results: [...] }
+            allUrls = mapData.results;
+        }
+        
+        if (allUrls.length > 0) {
+            // Fetch homepage links for ranking
+            mapStatus.textContent = 'Analyzing homepage links for ranking...';
+            const homepageLinks = await fetchHomepageLinks(url);
+            console.log('Homepage links:', homepageLinks);
+            
+            // Rank the URLs
+            mapStatus.textContent = 'Ranking URLs by importance...';
+            const rankedUrls = rankUrlsByImportance(allUrls, homepageLinks, url);
+            
+            // Display the results
+            urlCount.textContent = rankedUrls.length.toString();
+            
+            // Format the URLs nicely, one per line
+            const formattedUrls = rankedUrls.join('\n');
+            mapResults.textContent = formattedUrls;
+            
+            // Complete the progress bar
+            mapProgressBar.style.width = '100%';
+            mapProgressBar.classList.remove('progress-bar-animated');
+            mapStatus.textContent = `Mapping complete. Found ${rankedUrls.length} URLs, ranked by importance.`;
+        } else {
+            // No URLs found or unexpected response format
+            // Try to find links in other places in the response
+            if (mapData && mapData.success) {
+                urlCount.textContent = "0";
+                mapStatus.textContent = 'No URLs found in response. The website may not have any links or may be blocking crawlers.';
+            } else {
+                mapStatus.textContent = 'Unexpected response format received from API.';
+            }
+            
+            console.error('Invalid map data format:', mapData);
+            mapProgressBar.style.width = '100%';
+            mapProgressBar.classList.remove('progress-bar-animated');
+            mapResults.textContent = 'No URLs found.';
+        }
+    } catch (error) {
+        console.error('Error mapping website:', error);
+        mapStatus.textContent = `Error: ${error.message}`;
+        mapStatus.classList.add('text-danger');
+        mapProgressBar.style.width = '100%';
+        mapProgressBar.classList.remove('progress-bar-animated');
+    } finally {
+        loadingOverlay.classList.add('d-none');
+    }
 }

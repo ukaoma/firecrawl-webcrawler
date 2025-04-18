@@ -11,6 +11,11 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'web', 'index.html'));
 });
 
+// Serve the quilt index page
+app.get('/quilt', (req, res) => {
+  res.sendFile(path.join(__dirname, 'web', 'quilt-index.html'));
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`ZIP Code Data Extractor app running at http://localhost:${PORT}`);
