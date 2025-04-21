@@ -183,11 +183,30 @@ https://knowledge.example.com/article3"></textarea>
                                 <textarea class="form-control mb-3" id="bulkUrlsInput" rows="4" placeholder="Example: 
 https://example.com/page1, https://example.com/page2, https://example.com/page3"></textarea>
                                 
-                                <p>Enter extraction parameters (describe what data to extract):</p>
-                                <textarea class="form-control mb-3" id="extractionPromptInput" rows="4" placeholder="Example:
+<p>Enter extraction parameters (describe what data to extract):</p>
+<textarea class="form-control mb-3" id="extractionPromptInput" rows="4" placeholder="Example:
 Extract the product name, price, rating, and availability from each page."></textarea>
-                                
-                                <button id="processBulkUrlsButton" class="btn btn-primary">Process URLs</button>
+
+<div class="form-check mb-3">
+    <input class="form-check-input" type="checkbox" id="useFire1AgentCheck">
+    <label class="form-check-label" for="useFire1AgentCheck">
+        Use FIRE-1 Agent (handles dynamic navigation, pagination, etc.)
+    </label>
+    <div class="form-text small">
+        <strong>Note:</strong> Using the FIRE-1 agent will increase cost (150 credits per URL) but provides better results for dynamic content.
+    </div>
+</div>
+
+<div id="agentPromptSection" class="mb-3 d-none">
+    <p>Enter navigation instructions for FIRE-1 agent:</p>
+    <textarea class="form-control" id="agentPromptInput" rows="3" placeholder="Example:
+Navigate through the product listings by clicking the 'Next Page' button until disabled. Scrape each page."></textarea>
+    <div class="form-text small">
+        These instructions tell the agent how to interact with the webpage (clicking buttons, navigating pagination, etc.)
+    </div>
+</div>
+
+<button id="processBulkUrlsButton" class="btn btn-primary">Process URLs</button>
                                 
                                 <!-- Bulk Extract Results Section -->
                                 <div id="bulkResultsSection" class="d-none mt-4">

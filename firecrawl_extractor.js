@@ -39,6 +39,17 @@ const BATCH_SIZE = 10; // Process in batches to avoid rate limiting
 const INPUT_FILE = "zip_data.csv";
 const OUTPUT_FILE = "zip_data_updated.csv";
 
+// Parse command line arguments
+const args = process.argv.slice(2);
+const USE_FIRE1_AGENT = args.includes('--use-agent');
+const AGENT_PROMPT = args.find(arg => arg.startsWith('--agent-prompt='))?.split('=')[1] || 
+  "Navigate through the website content and handle any dynamic elements such as pagination, tabs, or popup dialogs as needed to extract all relevant data.";
+
+console.log(`FIRE-1 Agent: ${USE_FIRE1_AGENT ? 'Enabled' : 'Disabled'}`);
+if (USE_FIRE1_AGENT) {
+  console.log(`Agent Prompt: ${AGENT_PROMPT}`);
+}
+
 // Initialize the Firecrawl app
 const app = new firecrawlJs.default({apiKey: API_KEY});
 
@@ -115,12 +126,28 @@ async function processZipCodeBatches() {
     console.log(`Zip codes: ${batchZips.join(', ')}`);
     
     try {
+      // Create extraction options
+      const extractOptions = {
+        prompt: "Extract the population and density from the specific URLs / Zip codes I provide you with.",
+        schema
+      };
+      
+      // Add FIRE-1 agent if enabled via command line flag
+      if (USE_FIRE1_AGENT) {
+        // IMPORTANT: Only include the model in the agent object, not prompt
+        extractOptions.agent = {
+          model: "FIRE-1"
+        };
+        
+        // Add agent navigation instructions to the main prompt
+        extractOptions.prompt = `${extractOptions.prompt} ${AGENT_PROMPT}`;
+        console.log("Using FIRE-1 agent for extraction");
+        console.log(`Enhanced prompt: ${extractOptions.prompt}`);
+      }
+      
       const extractResult = await app.extract(
         batchUrls, 
-        {
-          prompt: "Extract the population and density from the specific URLs / Zip codes I provide you with.",
-          schema,
-        }
+        extractOptions
       );
       
       if (extractResult && extractResult.zip_data) {

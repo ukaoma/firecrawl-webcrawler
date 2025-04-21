@@ -30,6 +30,9 @@ const mapResults = document.getElementById('mapResults');
 // Bulk Extract Feature DOM Elements
 const bulkUrlsInput = document.getElementById('bulkUrlsInput');
 const extractionPromptInput = document.getElementById('extractionPromptInput');
+const useFire1AgentCheck = document.getElementById('useFire1AgentCheck');
+const agentPromptSection = document.getElementById('agentPromptSection');
+const agentPromptInput = document.getElementById('agentPromptInput');
 const processBulkUrlsButton = document.getElementById('processBulkUrlsButton');
 const bulkResultsSection = document.getElementById('bulkResultsSection');
 const bulkProgressBar = document.getElementById('bulkProgressBar');
@@ -102,6 +105,17 @@ document.addEventListener('DOMContentLoaded', () => {
     downloadBulkResultsButton.addEventListener('click', downloadBulkResults);
     processKbUrlsButton.addEventListener('click', processKbUrls);
     downloadKbResultsButton.addEventListener('click', downloadKbResults);
+    
+    // Set up FIRE-1 agent toggle
+    if (useFire1AgentCheck) {
+        useFire1AgentCheck.addEventListener('change', function() {
+            if (this.checked) {
+                agentPromptSection.classList.remove('d-none');
+            } else {
+                agentPromptSection.classList.add('d-none');
+            }
+        });
+    }
     
     // Initialize Bootstrap tabs
     const tabElements = document.querySelectorAll('a[data-bs-toggle="tab"]');
@@ -753,6 +767,12 @@ async function processBulkUrls() {
         return;
     }
     
+    // Warn user about rate limits if there are many URLs
+    if (urls.length > 10) {
+        const proceed = confirm(`You're processing ${urls.length} URLs, but Firecrawl has a rate limit of 10 requests per minute. The extraction will be throttled to respect these limits, which may take some time. Continue?`);
+        if (!proceed) return;
+    }
+    
     // Show the results section
     bulkResultsSection.classList.remove('d-none');
     
@@ -777,7 +797,11 @@ async function processBulkUrls() {
     startGlobalProgressTracking(urls.length);
     
     try {
-        // Process each URL sequentially
+        // Calculate required delay between requests to stay under rate limit
+        // Firecrawl has a limit of 10 requests per minute
+        const MIN_DELAY_BETWEEN_REQUESTS = 6000; // 6 seconds to stay under 10/minute
+        
+        // Process each URL sequentially with rate limiting
         for (let i = 0; i < urls.length; i++) {
             const url = urls[i];
             const urlStartTime = Date.now();
@@ -798,7 +822,19 @@ async function processBulkUrls() {
             } catch (error) {
                 console.error(`Error processing URL ${url}:`, error);
                 
-                // Add error result to the table
+                // Check if this is a rate limit error
+                if (error.message && error.message.includes('429') && error.message.includes('Rate limit exceeded')) {
+                    bulkStatus.textContent = `Rate limit hit. Waiting 60 seconds before continuing...`;
+                    
+                    // If rate limited, wait for 60 seconds before continuing
+                    await sleep(60000);
+                    
+                    // Try again with the same URL (decrement the counter)
+                    i--;
+                    continue;
+                }
+                
+                // Add error result to the table for non-rate-limit errors
                 addBulkResult({
                     url: url,
                     data: {},
@@ -813,9 +849,15 @@ async function processBulkUrls() {
                 updateGlobalProgress(false, urlProcessingTime);
             }
             
-            // Short delay between URLs to avoid rate limiting
+            // Add a delay between requests to avoid rate limiting
             if (i < urls.length - 1) {
-                await sleep(1000);
+                const timeElapsed = Date.now() - urlStartTime;
+                const requiredDelay = Math.max(MIN_DELAY_BETWEEN_REQUESTS - timeElapsed, 0);
+                
+                if (requiredDelay > 0) {
+                    bulkStatus.textContent = `Rate limiting: waiting ${Math.round(requiredDelay/1000)} seconds before processing next URL...`;
+                    await sleep(requiredDelay);
+                }
             }
         }
         
@@ -949,17 +991,40 @@ async function extractDataFromUrl(url, prompt) {
             additionalProperties: false // Only allow the properties explicitly specified
         };
         
+        // Prepare request body
+        const requestBody = {
+            urls: [url],
+            prompt: prompt,
+            schema: schema
+        };
+        
+        // If FIRE-1 agent is enabled, add the agent parameter and update the prompt
+        if (useFire1AgentCheck && useFire1AgentCheck.checked) {
+            // Get agent navigation instructions
+            const agentPrompt = agentPromptInput ? agentPromptInput.value.trim() : "";
+            const navigationInstructions = agentPrompt || 
+                "Navigate through the website content and handle any dynamic elements such as pagination, tabs, or popup dialogs as needed to extract all relevant data.";
+            
+            // Per the API documentation, only include model in the agent object
+            requestBody.agent = {
+                model: "FIRE-1"
+            };
+            
+            // Combine the extraction parameters with navigation instructions in the main prompt
+            requestBody.prompt = `${requestBody.prompt} ${navigationInstructions}`;
+            
+            console.log(`Using FIRE-1 agent for ${url}`);
+            console.log(`Enhanced prompt: ${requestBody.prompt}`);
+            bulkStatus.textContent = `Using FIRE-1 agent for ${url}...`;
+        }
+        
         const jobSubmissionResponse = await fetch('https://api.firecrawl.dev/v1/extract', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${API_KEY}`
             },
-            body: JSON.stringify({
-                urls: [url],
-                prompt: prompt,
-                schema: schema
-            })
+            body: JSON.stringify(requestBody)
         });
         
         if (!jobSubmissionResponse.ok) {
@@ -1709,7 +1774,7 @@ async function processKbArticle(url, currentIndex, totalArticles) {
             required: ["category", "article_name", "published_date", "content"]
         };
         
-        const prompt = "Extract the following from this knowledge base article (ignore related/trending articles): the article's category/section, title, published date, and all main content. For the content, preserve the structure with headings, text paragraphs (noting if text is bold), and images. Return this as structured data.";
+        const prompt = "Extract the following from this knowledge base article (ignore related/trending articles): the article's category/section, title, published date, and all main content. For the content, preserve the structure with headings, text paragraphs (noting if text is bold), and ALL images. IMPORTANT: For images, always extract the actual image URLs from the article - never use placeholder URLs (like example.com/image.png) and never set image fields to null unless there is truly no image in that section. Return all image URLs as absolute URLs (not relative paths). If you find images with relative paths (starting with '/' or '../'), convert them to absolute URLs using the page's base URL/domain. Only include real images that exist in the article content.";
         
         kbStatus.textContent = `Submitting extraction job for article ${currentIndex} of ${totalArticles}...`;
         kbProgressBar.style.width = '20%';
@@ -1819,6 +1884,63 @@ async function processKbArticle(url, currentIndex, totalArticles) {
         if (extractionResults && extractionResults.data) {
             articleData = extractionResults.data;
             console.log('Extracted article data:', articleData);
+            
+            // Validate and fix the image URLs in the content
+            if (articleData.content && Array.isArray(articleData.content)) {
+                let hasPlaceholderImage = false;
+                let hasRelativeUrls = false;
+                
+                // Parse the article URL to get the origin for resolving relative URLs
+                let articleOrigin = '';
+                try {
+                    const parsedUrl = new URL(url);
+                    articleOrigin = parsedUrl.origin; // e.g., https://rainpos.my.site.com
+                } catch (e) {
+                    console.warn(`Could not parse article URL: ${url}`, e);
+                }
+                
+                // Process each content item
+                articleData.content = articleData.content.map(item => {
+                    // Only process items that have image_url property
+                    if (item.image_url) {
+                        // Check for placeholder URLs like example.com
+                        if (item.image_url.includes('example.com') || 
+                            item.image_url.includes('placeholder') || 
+                            item.image_url.includes('dummy.')) {
+                            console.warn(`Found placeholder image URL: ${item.image_url}`);
+                            hasPlaceholderImage = true;
+                            // Remove the placeholder URL entirely (better than keeping a false URL)
+                            return {...item, image_url: null};
+                        }
+                        
+                        // Handle relative URLs (starting with / or ../)
+                        if (item.image_url.startsWith('/') && articleOrigin) {
+                            console.log(`Converting relative URL to absolute: ${item.image_url}`);
+                            hasRelativeUrls = true;
+                            return {...item, image_url: articleOrigin + item.image_url};
+                        }
+                        
+                        // Handle relative URLs starting with ../ (less common but possible)
+                        if (item.image_url.startsWith('../') && articleOrigin) {
+                            console.log(`Converting relative URL (../) to absolute: ${item.image_url}`);
+                            hasRelativeUrls = true;
+                            // This is a simplification - for proper path resolution a more complex algorithm is needed
+                            // But for most cases, replacing ../ with the origin will work for Salesforce Knowledge
+                            return {...item, image_url: articleOrigin + '/' + item.image_url.substring(3)};
+                        }
+                    }
+                    return item;
+                });
+                
+                // Log warnings
+                if (hasPlaceholderImage) {
+                    console.warn(`Article ${url} contained placeholder image URLs that were removed.`);
+                }
+                
+                if (hasRelativeUrls) {
+                    console.log(`Article ${url} contained relative image URLs that were converted to absolute URLs.`);
+                }
+            }
             
             // Add to results
             addKbResult({
