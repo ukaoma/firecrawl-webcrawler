@@ -1,6 +1,7 @@
 const firecrawlJs = require('@mendable/firecrawl-js');
 const { z } = require('zod');
 const fs = require('fs');
+const imageProcessor = require('./image_url_processor');
 
 // List of all zip codes
 const zipCodes = [
@@ -35,7 +36,8 @@ const zipCodes = [
 
 // Configuration
 const API_KEY = "fc-4bd96b21a1fa459a9336127ab8974234";
-const BATCH_SIZE = 10; // Process in batches to avoid rate limiting
+const BATCH_SIZE = 8; // Reduced from 10 to prevent API timeouts
+const BATCH_DELAY_MS = 2300; // Increased by ~15% from 2000ms
 const INPUT_FILE = "zip_data.csv";
 const OUTPUT_FILE = "zip_data_updated.csv";
 
@@ -126,9 +128,9 @@ async function processZipCodeBatches() {
     console.log(`Zip codes: ${batchZips.join(', ')}`);
     
     try {
-      // Create extraction options
+      // Create extraction options with image instructions
       const extractOptions = {
-        prompt: "Extract the population and density from the specific URLs / Zip codes I provide you with.",
+        prompt: "Extract the population and density from the specific URLs / Zip codes I provide you with. For any images from rainpos.my.site.com, only use images with URLs in the format /servlet/rtaImage?eid=...&feoid=...&refid=... and avoid using direct image paths like /images/... as they require login and are not publicly accessible. IMPORTANT: Wait for all dynamic content to fully load on the page, including images that may load after initial page rendering. Look for the publicly accessible servlet image URLs that might appear when right-clicking on images in the page.",
         schema
       };
       
@@ -139,16 +141,45 @@ async function processZipCodeBatches() {
           model: "FIRE-1"
         };
         
-        // Add agent navigation instructions to the main prompt
-        extractOptions.prompt = `${extractOptions.prompt} ${AGENT_PROMPT}`;
-        console.log("Using FIRE-1 agent for extraction");
-        console.log(`Enhanced prompt: ${extractOptions.prompt}`);
-      }
+      // Add agent navigation instructions to the main prompt
+      extractOptions.prompt = `${extractOptions.prompt} ${AGENT_PROMPT}`;
+      console.log("Using FIRE-1 agent for extraction");
+      console.log(`Enhanced prompt: ${extractOptions.prompt}`);
+    }
+    
+    // Define the sequence of actions to ensure images are fully loaded,
+    // including specifically waiting for servlet images in Aura components
+    const actions = [
+      { type: "wait", milliseconds: 3000 },     // Initial wait for page to load
+      { type: "scroll", y: 800 },               // First scroll to trigger lazy loading
+      { type: "wait", milliseconds: 1500 },     // Wait after first scroll
+      { type: "scroll", y: 1600 },              // Second scroll to load more content
+      { type: "wait", milliseconds: 1500 },     // Wait after second scroll
+      { type: "scroll", y: 2400 },              // Third scroll to ensure all content is loaded
+      { type: "wait", milliseconds: 1000 },     // Brief wait after scrolling
       
-      const extractResult = await app.extract(
-        batchUrls, 
-        extractOptions
-      );
+      // Wait for any servlet images to load - these are often within Aura components
+      // and loaded dynamically after the page renders
+      { type: "waitForSelector", selector: 'img[src^="/servlet/rtaImage"]', timeout: 5000 },
+      
+      { type: "wait", milliseconds: 1000 },     // Final wait before extraction after images found
+      { type: "scrape" }                        // Perform the actual scraping
+    ];
+    
+    console.log("Using action sequence to ensure all content is loaded:", 
+      JSON.stringify(actions.map(a => a.type).join(' → ')));
+    
+    // Add the actions to extraction options
+    extractOptions.actions = actions;
+    
+    let extractResult = await app.extract(
+      batchUrls, 
+      extractOptions
+    );
+      
+      // Process the extraction result to clean up any non-compliant image URLs
+      console.log("Post-processing extraction result to ensure proper image URLs...");
+      extractResult = imageProcessor.processExtractionResult(extractResult);
       
       if (extractResult && extractResult.zip_data) {
         const extractedData = extractResult.zip_data;
@@ -188,10 +219,10 @@ async function processZipCodeBatches() {
     });
     fs.writeFileSync(OUTPUT_FILE, header + '\n' + updatedContent);
     
-    // Add a small delay between batches to avoid rate limiting
+    // Add a delay between batches to avoid rate limiting and timeouts
     if (i + BATCH_SIZE < zipDataToProcess.length) {
-      console.log("Waiting 2 seconds before next batch...");
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      console.log(`Waiting ${BATCH_DELAY_MS/1000} seconds before next batch...`);
+      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
     }
   }
   

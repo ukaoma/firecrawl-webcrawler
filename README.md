@@ -70,6 +70,18 @@ node sample_extract.js
 ```
 Quick test with a small batch of ZIP codes.
 
+#### Image Extraction Test (test_image_extraction.js)
+```
+node test_image_extraction.js
+```
+Tests the extraction of servlet images using action sequences, comparing results with and without the optimization.
+
+#### Test Runner (run_image_extraction_test.sh)
+```
+./run_image_extraction_test.sh
+```
+Shell script that runs both sample extraction and image extraction tests, showing the improvements in image extraction consistency.
+
 ## Project Structure
 
 ```
@@ -80,6 +92,9 @@ firecrawl-webcrawler/
 ├── firecrawl_extractor.js   # Main extraction script
 ├── zip_extractor_robust.js  # Enhanced extraction script with logging
 ├── sample_extract.js        # Sample test script
+├── test_image_extraction.js # Image extraction test script
+├── run_image_extraction_test.sh # Test runner for image extraction
+├── IMAGE_EXTRACTION_DOCS.md # Documentation for servlet image extraction solution
 ├── web/                     # Web interface files
 │   ├── index.html           # Main HTML interface
 │   ├── styles.css           # CSS styling
@@ -114,3 +129,4 @@ Additional documentation is available in:
 - **API Rate Limiting**: By default, the scripts process ZIP codes in small batches to avoid rate limiting. You can adjust the batch size in the script settings.
 - **CSV Format**: When uploading a CSV, ensure it has a column with a name containing "zip", "zipcode", "postal code", or similar.
 - **Error Handling**: Check the `logs` directory for detailed error logs when using the robust script.
+- **Image Extraction Issues**: If servlet images are not consistently extracted, the action sequence parameters may need adjustment. See IMAGE_EXTRACTION_DOCS.md for details on configuring wait times and scroll distances.
