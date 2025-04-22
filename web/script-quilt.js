@@ -136,7 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
             target.classList.add('active');
             
             // Show/hide ZIP code footer based on active tab
-            if (tab.id === 'map-tab' || tab.id === 'bulk-extract-tab') {
+            if (tab.id === 'map-tab' || tab.id === 'bulk-extract-tab' || tab.id === 'kb-extract-tab') {
                 zipCodeFooter.classList.add('d-none');
             } else {
                 zipCodeFooter.classList.remove('d-none');
@@ -798,8 +798,8 @@ async function processBulkUrls() {
     
     try {
         // Calculate required delay between requests to stay under rate limit
-        // Firecrawl has a limit of 10 requests per minute
-        const MIN_DELAY_BETWEEN_REQUESTS = 6000; // 6 seconds to stay under 10/minute
+        // Firecrawl has a limit of 500 requests per minute with Explorer plan
+        const MIN_DELAY_BETWEEN_REQUESTS = 120; // 120ms to stay under 500/minute
         
         // Process each URL sequentially with rate limiting
         for (let i = 0; i < urls.length; i++) {
@@ -1640,7 +1640,7 @@ function downloadMapResults() {
     document.body.removeChild(link);
 }
 
-// Process knowledge base articles extraction
+// Process knowledge base articles extraction with concurrent processing
 async function processKbUrls() {
     // Get URLs from input
     const urlsInput = kbUrlsInput.value.trim();
@@ -1682,52 +1682,117 @@ async function processKbUrls() {
     startKbProgressTracking(urls.length);
     
     try {
-        // Process each URL sequentially
-        for (let i = 0; i < urls.length; i++) {
-            const url = urls[i];
-            const articleStartTime = Date.now();
+        // Process URLs with concurrency (5 concurrent jobs)
+        const MAX_CONCURRENT_JOBS = 5; // Utilizing all concurrent browser sessions
+        kbStatus.textContent = `Processing with ${MAX_CONCURRENT_JOBS} concurrent jobs...`;
+        
+        // Create a queue of URLs to process
+        const urlQueue = [...urls]; // Copy the array
+        
+        // Create a pool to track active jobs
+        const activeJobs = [];
+        const processedIndexes = new Set(); // Track which indexes have been processed
+        
+        // Define function to update status with current active jobs
+        // Define this here so it has access to activeJobs via closure
+        const updateConcurrentJobsStatus = () => {
+            if (activeJobs.length === 0) return;
             
-            // Update UI to show which URL we're processing
-            kbStatus.textContent = `Processing article ${i+1} of ${urls.length}: ${url}`;
-            
-            try {
-                // Process this article URL
-                await processKbArticle(url, i+1, urls.length);
+            const activeJobText = activeJobs
+                .slice(0, 3) // Show at most 3 jobs to avoid long status text
+                .map(job => `#${job.index}`)
+                .join(', ');
                 
-                // Calculate processing time for this article
-                const articleProcessingTime = Date.now() - articleStartTime;
+            const additionalJobsText = activeJobs.length > 3 ? ` and ${activeJobs.length - 3} more` : '';
+            kbStatus.textContent = `Processing articles ${activeJobText}${additionalJobsText} concurrently (${processedIndexes.size} of ${urls.length} total)`;
+        };
+        
+        // Process the queue concurrently
+        while (urlQueue.length > 0 || activeJobs.length > 0) {
+            // Fill the active jobs pool up to MAX_CONCURRENT_JOBS
+            while (activeJobs.length < MAX_CONCURRENT_JOBS && urlQueue.length > 0) {
+                const url = urlQueue.shift(); // Get next URL from queue
+                const index = urls.indexOf(url);
                 
-                // Update global progress
-                updateKbProgress(true, articleProcessingTime);
-                
-            } catch (error) {
-                console.error(`Error processing article ${url}:`, error);
-                
-                // Add error result to the table
-                addKbResult({
-                    url: url,
-                    category: '',
-                    article_name: '',
-                    published_date: '',
-                    content: [],
-                    error: error.message,
-                    status: 'error'
-                });
-                
-                // Calculate processing time for this article (even though it failed)
-                const articleProcessingTime = Date.now() - articleStartTime;
-                
-                // Update global progress
-                updateKbProgress(false, articleProcessingTime);
+                if (!processedIndexes.has(index)) {
+                    processedIndexes.add(index);
+                    
+                    // Create a job for this URL
+                    const articleStartTime = Date.now();
+                    const articleIndex = index + 1; // 1-based index for display
+                    
+                    // Update one of the currently processing jobs in the status
+                    updateConcurrentJobsStatus();
+                    
+                    // Create a promise for this job
+                    const jobPromise = (async () => {
+                        try {
+                            await processKbArticle(url, articleIndex, urls.length);
+                            updateKbProgress(true, Date.now() - articleStartTime);
+                            return { url, success: true, time: Date.now() - articleStartTime };
+                        } catch (error) {
+                            console.error(`Error processing article ${url}:`, error);
+                            
+                            // Add error result to the table
+                            addKbResult({
+                                url: url,
+                                category: '',
+                                article_name: '',
+                                published_date: '',
+                                content: [],
+                                error: error.message,
+                                status: 'error'
+                            });
+                            
+                            updateKbProgress(false, Date.now() - articleStartTime);
+                            return { url, success: false, error, time: Date.now() - articleStartTime };
+                        }
+                    })();
+                    
+                    // Add this job to the active jobs pool
+                    activeJobs.push({ 
+                        promise: jobPromise, 
+                        url, 
+                        index: articleIndex,
+                        startTime: articleStartTime 
+                    });
+                }
             }
             
-            // Short delay between URLs to avoid rate limiting
-            if (i < urls.length - 1) {
-                await sleep(1000);
+            // If we have active jobs, wait for at least one to complete
+            if (activeJobs.length > 0) {
+                // Create an array of promises that resolve when jobs complete
+                const promises = activeJobs.map(job => job.promise);
+                
+                // Wait for at least one job to complete
+                await Promise.race(promises);
+                
+                // Remove completed jobs from active pool by checking which promises have resolved
+                const stillRunning = [];
+                
+                // Check each job to see if it's still running
+                for (const job of activeJobs) {
+                    // Use Promise.race with a zero-timeout to check if the promise is still pending
+                    const isResolved = await Promise.race([
+                        job.promise.then(() => true, () => true), // Resolved (success or error)
+                        new Promise(resolve => setTimeout(() => resolve(false), 0)) // Still pending
+                    ]);
+                    
+                    if (!isResolved) {
+                        stillRunning.push(job);
+                    }
+                }
+                
+                // Update active jobs to only include those still running
+                activeJobs.length = 0;
+                activeJobs.push(...stillRunning);
+                
+                // Update status with current jobs
+                updateConcurrentJobsStatus();
             }
         }
         
-        // Processing complete
+        // All jobs are complete
         kbExtractionComplete = true;
         kbProgressBar.style.width = '100%';
         kbProgressBar.classList.remove('progress-bar-animated');
@@ -1885,61 +1950,77 @@ async function processKbArticle(url, currentIndex, totalArticles) {
             articleData = extractionResults.data;
             console.log('Extracted article data:', articleData);
             
-            // Validate and fix the image URLs in the content
-            if (articleData.content && Array.isArray(articleData.content)) {
-                let hasPlaceholderImage = false;
-                let hasRelativeUrls = false;
+            // Check if content is present and non-empty
+            if (!articleData.content || !Array.isArray(articleData.content) || articleData.content.length === 0) {
+                console.warn(`Empty content returned for article ${url}`);
                 
-                // Parse the article URL to get the origin for resolving relative URLs
-                let articleOrigin = '';
-                try {
-                    const parsedUrl = new URL(url);
-                    articleOrigin = parsedUrl.origin; // e.g., https://rainpos.my.site.com
-                } catch (e) {
-                    console.warn(`Could not parse article URL: ${url}`, e);
-                }
-                
-                // Process each content item
-                articleData.content = articleData.content.map(item => {
-                    // Only process items that have image_url property
-                    if (item.image_url) {
-                        // Check for placeholder URLs like example.com
-                        if (item.image_url.includes('example.com') || 
-                            item.image_url.includes('placeholder') || 
-                            item.image_url.includes('dummy.')) {
-                            console.warn(`Found placeholder image URL: ${item.image_url}`);
-                            hasPlaceholderImage = true;
-                            // Remove the placeholder URL entirely (better than keeping a false URL)
-                            return {...item, image_url: null};
-                        }
-                        
-                        // Handle relative URLs (starting with / or ../)
-                        if (item.image_url.startsWith('/') && articleOrigin) {
-                            console.log(`Converting relative URL to absolute: ${item.image_url}`);
-                            hasRelativeUrls = true;
-                            return {...item, image_url: articleOrigin + item.image_url};
-                        }
-                        
-                        // Handle relative URLs starting with ../ (less common but possible)
-                        if (item.image_url.startsWith('../') && articleOrigin) {
-                            console.log(`Converting relative URL (../) to absolute: ${item.image_url}`);
-                            hasRelativeUrls = true;
-                            // This is a simplification - for proper path resolution a more complex algorithm is needed
-                            // But for most cases, replacing ../ with the origin will work for Salesforce Knowledge
-                            return {...item, image_url: articleOrigin + '/' + item.image_url.substring(3)};
-                        }
-                    }
-                    return item;
+                // Add to results with error
+                addKbResult({
+                    url: url,
+                    category: articleData.category || '',
+                    article_name: articleData.article_name || '',
+                    published_date: articleData.published_date || '',
+                    content: [],
+                    error: 'Article was extracted but content is empty',
+                    status: 'error'
                 });
                 
-                // Log warnings
-                if (hasPlaceholderImage) {
-                    console.warn(`Article ${url} contained placeholder image URLs that were removed.`);
+                return false;
+            }
+            
+            // Content exists, validate and fix the image URLs
+            let hasPlaceholderImage = false;
+            let hasRelativeUrls = false;
+            
+            // Parse the article URL to get the origin for resolving relative URLs
+            let articleOrigin = '';
+            try {
+                const parsedUrl = new URL(url);
+                articleOrigin = parsedUrl.origin; // e.g., https://rainpos.my.site.com
+            } catch (e) {
+                console.warn(`Could not parse article URL: ${url}`, e);
+            }
+            
+            // Process each content item
+            articleData.content = articleData.content.map(item => {
+                // Only process items that have image_url property
+                if (item.image_url) {
+                    // Check for placeholder URLs like example.com
+                    if (item.image_url.includes('example.com') || 
+                        item.image_url.includes('placeholder') || 
+                        item.image_url.includes('dummy.')) {
+                        console.warn(`Found placeholder image URL: ${item.image_url}`);
+                        hasPlaceholderImage = true;
+                        // Remove the placeholder URL entirely (better than keeping a false URL)
+                        return {...item, image_url: null};
+                    }
+                    
+                    // Handle relative URLs (starting with / or ../)
+                    if (item.image_url.startsWith('/') && articleOrigin) {
+                        console.log(`Converting relative URL to absolute: ${item.image_url}`);
+                        hasRelativeUrls = true;
+                        return {...item, image_url: articleOrigin + item.image_url};
+                    }
+                    
+                    // Handle relative URLs starting with ../ (less common but possible)
+                    if (item.image_url.startsWith('../') && articleOrigin) {
+                        console.log(`Converting relative URL (../) to absolute: ${item.image_url}`);
+                        hasRelativeUrls = true;
+                        // This is a simplification - for proper path resolution a more complex algorithm is needed
+                        // But for most cases, replacing ../ with the origin will work for Salesforce Knowledge
+                        return {...item, image_url: articleOrigin + '/' + item.image_url.substring(3)};
+                    }
                 }
-                
-                if (hasRelativeUrls) {
-                    console.log(`Article ${url} contained relative image URLs that were converted to absolute URLs.`);
-                }
+                return item;
+            });
+            
+            // Log warnings
+            if (hasPlaceholderImage) {
+                console.warn(`Article ${url} contained placeholder image URLs that were removed.`);
+            }
+            
+            if (hasRelativeUrls) {
+                console.log(`Article ${url} contained relative image URLs that were converted to absolute URLs.`);
             }
             
             // Add to results
@@ -1975,13 +2056,93 @@ async function processKbArticle(url, currentIndex, totalArticles) {
     }
 }
 
+/**
+ * Converts KB content blocks to semantic HTML
+ * @param {Array} contentBlocks - Array of content blocks (e.g., headings, text, images, lists)
+ * @returns {string} - Semantic HTML representation of the content
+ */
+function convertKbContentToHtml(contentBlocks) {
+    if (!contentBlocks || !Array.isArray(contentBlocks) || contentBlocks.length === 0) {
+        return '<p class="text-muted">No content available.</p>';
+    }
+    
+    let html = '';
+    
+    // Process each content block based on its type
+    contentBlocks.forEach(block => {
+        switch (block.type) {
+            case 'heading':
+                // Create a heading with the appropriate level (h1-h6)
+                const level = block.level && block.level >= 1 && block.level <= 6 ? block.level : 2;
+                html += `<h${level}>${escapeHtml(block.content)}</h${level}>`;
+                break;
+                
+            case 'text':
+                // Create a paragraph, with optional bolding
+                if (block.is_bold) {
+                    html += `<p><strong>${escapeHtml(block.content)}</strong></p>`;
+                } else {
+                    html += `<p>${escapeHtml(block.content)}</p>`;
+                }
+                break;
+                
+            case 'image':
+                // Create an image with proper handling for missing URLs
+                // First check image_url, then fallback to content field if image_url is null
+                const imageUrl = block.image_url || (block.type === 'image' ? block.content : null);
+                if (imageUrl) {
+                    html += `<img src="${imageUrl}" alt="Article image" />`;
+                } else {
+                    html += `<div class="missing-image">Image not available</div>`;
+                }
+                break;
+                
+            case 'list':
+                // Create ordered or unordered lists
+                if (block.items && Array.isArray(block.items)) {
+                    const listType = block.ordered ? 'ol' : 'ul';
+                    html += `<${listType}>`;
+                    block.items.forEach(item => {
+                        html += `<li>${escapeHtml(item)}</li>`;
+                    });
+                    html += `</${listType}>`;
+                }
+                break;
+                
+            default:
+                // Fallback for unknown types
+                html += `<p>${escapeHtml(block.content || JSON.stringify(block))}</p>`;
+        }
+    });
+    
+    return html;
+}
+
+/**
+ * Helper function to escape HTML special characters
+ * @param {string} text - The text to escape
+ * @returns {string} - HTML-escaped text
+ */
+function escapeHtml(text) {
+    if (!text) return '';
+    
+    const element = document.createElement('div');
+    element.textContent = text;
+    return element.innerHTML;
+}
+
 // Add a knowledge base result to the table
 function addKbResult(result) {
     // Add to the results array
     kbResults.push(result);
     
+    // Generate unique ID for this result
+    const resultId = `kb-result-${kbResults.length}`;
+    result.id = resultId; // Store the ID with the result
+    
     // Add a row to the table
     const row = document.createElement('tr');
+    row.setAttribute('data-result-id', resultId);
     
     // URL cell
     const urlCell = document.createElement('td');
@@ -2019,7 +2180,18 @@ function addKbResult(result) {
             return '';
         }).join('<br>');
         
+        // Add the preview and View Full Content button
         contentCell.innerHTML = contentPreview + (result.content.length > 3 ? '<br>...' : '');
+        
+        // Only add View Content button if we have content
+        if (result.content.length > 0) {
+            const viewBtn = document.createElement('button');
+            viewBtn.className = 'btn btn-sm view-content-btn mt-2';
+            viewBtn.textContent = 'View Full Content';
+            viewBtn.setAttribute('data-result-id', resultId);
+            viewBtn.addEventListener('click', () => showContentModal(result));
+            contentCell.appendChild(viewBtn);
+        }
     } else {
         contentCell.textContent = '-';
     }
@@ -2039,6 +2211,78 @@ function addKbResult(result) {
     
     // Add the row to the table
     kbResultsTableBody.appendChild(row);
+}
+
+/**
+ * Shows the content modal with HTML preview, HTML code, and JSON
+ * @param {Object} result - The KB result object containing content
+ */
+function showContentModal(result) {
+    // Get the modal elements
+    const modal = document.getElementById('kbContentModal');
+    const modalTitle = document.getElementById('kbContentModalLabel');
+    const htmlPreviewContent = document.getElementById('htmlPreviewContent');
+    const htmlCodeContent = document.getElementById('htmlCodeContent');
+    const jsonContent = document.getElementById('jsonContent');
+    
+    // Set the modal title
+    modalTitle.textContent = result.article_name || 'Article Content';
+    
+    // Generate the HTML content
+    const htmlContent = convertKbContentToHtml(result.content);
+    
+    // Populate the HTML preview
+    htmlPreviewContent.innerHTML = htmlContent;
+    
+    // Populate the HTML code view (escaped)
+    htmlCodeContent.textContent = htmlContent;
+    
+    // Populate the JSON view (pretty-printed)
+    jsonContent.textContent = JSON.stringify(result.content, null, 2);
+    
+    // Set up the copy buttons
+    document.getElementById('copyHtmlButton').onclick = () => {
+        copyToClipboard(htmlContent, 'HTML copied to clipboard!');
+    };
+    
+    document.getElementById('copyJsonButton').onclick = () => {
+        copyToClipboard(JSON.stringify(result.content, null, 2), 'JSON copied to clipboard!');
+    };
+    
+    // Show the modal
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+}
+
+/**
+ * Copies content to clipboard and shows a temporary success message
+ * @param {string} content - The content to copy
+ * @param {string} successMessage - The success message to display
+ */
+function copyToClipboard(content, successMessage) {
+    // Copy to clipboard
+    navigator.clipboard.writeText(content)
+        .then(() => {
+            // Show success message
+            const button = event.target;
+            const originalText = button.textContent;
+            
+            // Change button text to success message
+            button.textContent = successMessage;
+            button.classList.add('btn-success');
+            button.classList.remove('btn-primary');
+            
+            // Reset button after 2 seconds
+            setTimeout(() => {
+                button.textContent = originalText;
+                button.classList.remove('btn-success');
+                button.classList.add('btn-primary');
+            }, 2000);
+        })
+        .catch(err => {
+            console.error('Failed to copy: ', err);
+            alert('Failed to copy to clipboard. Please try again.');
+        });
 }
 
 // Start knowledge base progress tracking
@@ -2136,7 +2380,7 @@ function downloadKbResults() {
     }
     
     // Define CSV headers
-    const headers = ['URL', 'Category', 'Article Name', 'Published Date', 'Content', 'Status', 'Error'];
+    const headers = ['URL', 'Category', 'Article Name', 'Published Date', 'Content', 'HTML Content', 'Status', 'Error'];
     
     // Create CSV content
     let csvContent = headers.join(',') + '\n';
@@ -2153,12 +2397,23 @@ function downloadKbResults() {
             }
         }
         
+        // Generate HTML content for successful extractions
+        let htmlContent = '';
+        if (result.status === 'success' && result.content && result.content.length > 0) {
+            try {
+                htmlContent = convertKbContentToHtml(result.content).replace(/"/g, '""');
+            } catch (e) {
+                htmlContent = 'Error generating HTML';
+            }
+        }
+        
         const row = [
             `"${result.url.replace(/"/g, '""')}"`,
             `"${(result.category || '').replace(/"/g, '""')}"`,
             `"${(result.article_name || '').replace(/"/g, '""')}"`,
             `"${(result.published_date || '').replace(/"/g, '""')}"`,
             `"${contentStr}"`,
+            `"${htmlContent}"`,
             result.status === 'success' ? 'Success' : 'Error',
             result.status === 'error' ? `"${(result.error || 'Unknown error').replace(/"/g, '""')}"` : ''
         ];
