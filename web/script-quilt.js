@@ -93,6 +93,31 @@ let totalArticlesToProcess = 0;
 let articleProcessingTimes = [];
 let kbProgressTimer = null;
 
+// KB Scrape Feature DOM Elements
+const kbScrapeUrlsInput = document.getElementById('kbScrapeUrlsInput');
+const processKbScrapeUrlsButton = document.getElementById('processKbScrapeUrlsButton');
+const kbScrapeResultsSection = document.getElementById('kbScrapeResultsSection');
+const kbScrapeProgressBar = document.getElementById('kbScrapeProgressBar');
+const kbScrapeStatus = document.getElementById('kbScrapeStatus');
+const kbScrapeResultsTable = document.getElementById('kbScrapeResultsTable');
+const kbScrapeResultsTableBody = document.getElementById('kbScrapeResultsTableBody');
+const downloadKbScrapeResultsButton = document.getElementById('downloadKbScrapeResultsButton');
+const kbScrapeGlobalProgressBar = document.getElementById('kbScrapeGlobalProgressBar');
+const kbScrapeGlobalProgressPercentage = document.getElementById('kbScrapeGlobalProgressPercentage');
+const kbScrapeGlobalStatusStats = document.getElementById('kbScrapeGlobalStatusStats');
+const kbScrapeElapsedTime = document.getElementById('kbScrapeElapsedTime');
+const kbScrapeEstimatedTime = document.getElementById('kbScrapeEstimatedTime');
+const kbScrapeCurrentProgressPercentage = document.getElementById('kbScrapeCurrentProgressPercentage');
+
+// KB Scrape Global Variables
+let kbScrapeResults = [];
+let kbScrapeComplete = false;
+let kbScrapeStartTime = null;
+let processedScrapeCount = 0;
+let totalScrapesToProcess = 0;
+let scrapeProcessingTimes = [];
+let kbScrapeProgressTimer = null;
+
 // Initialize the page
 document.addEventListener('DOMContentLoaded', () => {
     // Set up event listeners
@@ -105,6 +130,26 @@ document.addEventListener('DOMContentLoaded', () => {
     downloadBulkResultsButton.addEventListener('click', downloadBulkResults);
     processKbUrlsButton.addEventListener('click', processKbUrls);
     downloadKbResultsButton.addEventListener('click', downloadKbResults);
+    
+    // KB Scrape event listeners
+    if (processKbScrapeUrlsButton) {
+        processKbScrapeUrlsButton.addEventListener('click', processKbScrapeUrls);
+    }
+    if (downloadKbScrapeResultsButton) {
+        downloadKbScrapeResultsButton.addEventListener('click', downloadKbScrapeResults);
+    }
+    if (document.getElementById('copyMarkdownButton')) {
+        document.getElementById('copyMarkdownButton').addEventListener('click', function() {
+            const markdownContent = document.getElementById('markdownContent').textContent;
+            copyToClipboard(markdownContent, 'Markdown copied to clipboard!');
+        });
+    }
+    if (document.getElementById('copyScrapedHtmlButton')) {
+        document.getElementById('copyScrapedHtmlButton').addEventListener('click', function() {
+            const htmlContent = document.getElementById('scrapedHtmlCodeContent').textContent;
+            copyToClipboard(htmlContent, 'HTML copied to clipboard!');
+        });
+    }
     
     // Set up FIRE-1 agent toggle
     if (useFire1AgentCheck) {
@@ -1562,6 +1607,696 @@ async function processWebsiteMap() {
     } finally {
         loadingOverlay.classList.add('d-none');
     }
+}
+
+// Process knowledge base articles using the scrape endpoint (for JS-heavy pages)
+async function processKbScrapeUrls() {
+    // Get URLs from input
+    const urlsInput = kbScrapeUrlsInput.value.trim();
+    
+    if (!urlsInput) {
+        alert('Please enter article URLs to scrape.');
+        return;
+    }
+    
+    // Parse URLs (split by commas or newlines)
+    const urls = urlsInput.split(/[\n,]+/).map(url => url.trim()).filter(url => url !== '');
+    
+    if (urls.length === 0) {
+        alert('No valid URLs found.');
+        return;
+    }
+    
+    // Show the results section
+    kbScrapeResultsSection.classList.remove('d-none');
+    
+    // Clear previous results
+    kbScrapeResultsTableBody.innerHTML = '';
+    kbScrapeProgressBar.style.width = '0%';
+    kbScrapeProgressBar.classList.add('progress-bar-animated');
+    kbScrapeStatus.textContent = 'Preparing knowledge base scraping...';
+    kbScrapeCurrentProgressPercentage.textContent = '0%';
+    
+    // Reset global variables
+    kbScrapeResults = [];
+    kbScrapeComplete = false;
+    
+    // Show loading UI with scraping message
+    if (loadingMessage) {
+        loadingMessage.textContent = 'Scraping knowledge base articles...';
+    }
+    loadingOverlay.classList.remove('d-none');
+    
+    // Start KB scrape progress tracking
+    startKbScrapeProgressTracking(urls.length);
+    
+    try {
+        // Process URLs with concurrency (5 concurrent jobs)
+        const MAX_CONCURRENT_JOBS = 5;
+        kbScrapeStatus.textContent = `Processing with ${MAX_CONCURRENT_JOBS} concurrent jobs...`;
+        
+        // Create a queue of URLs to process
+        const urlQueue = [...urls];
+        
+        // Create a pool to track active jobs
+        const activeJobs = [];
+        const processedIndexes = new Set();
+        
+        // Define function to update status with current active jobs
+        const updateConcurrentJobsStatus = () => {
+            if (activeJobs.length === 0) return;
+            
+            const activeJobText = activeJobs
+                .slice(0, 3)
+                .map(job => `#${job.index}`)
+                .join(', ');
+                
+            const additionalJobsText = activeJobs.length > 3 ? ` and ${activeJobs.length - 3} more` : '';
+            kbScrapeStatus.textContent = `Scraping articles ${activeJobText}${additionalJobsText} concurrently (${processedIndexes.size} of ${urls.length} total)`;
+        };
+        
+        // Process the queue concurrently
+        while (urlQueue.length > 0 || activeJobs.length > 0) {
+            // Fill the active jobs pool up to MAX_CONCURRENT_JOBS
+            while (activeJobs.length < MAX_CONCURRENT_JOBS && urlQueue.length > 0) {
+                const url = urlQueue.shift();
+                const index = urls.indexOf(url);
+                
+                if (!processedIndexes.has(index)) {
+                    processedIndexes.add(index);
+                    
+                    // Create a job for this URL
+                    const articleStartTime = Date.now();
+                    const articleIndex = index + 1;
+                    
+                    // Update status
+                    updateConcurrentJobsStatus();
+                    
+                    // Create a promise for this job
+                    const jobPromise = (async () => {
+                        try {
+                            await processKbScrapeArticle(url, articleIndex, urls.length);
+                            updateKbScrapeProgress(true, Date.now() - articleStartTime);
+                            return { url, success: true, time: Date.now() - articleStartTime };
+                        } catch (error) {
+                            console.error(`Error scraping article ${url}:`, error);
+                            
+                            // Add error result to the table
+                            addKbScrapeResult({
+                                url: url,
+                                category: '',
+                                article_name: '',
+                                published_date: '',
+                                markdown: '',
+                                error: error.message,
+                                status: 'error'
+                            });
+                            
+                            updateKbScrapeProgress(false, Date.now() - articleStartTime);
+                            return { url, success: false, error, time: Date.now() - articleStartTime };
+                        }
+                    })();
+                    
+                    // Add this job to the active jobs pool
+                    activeJobs.push({ 
+                        promise: jobPromise, 
+                        url, 
+                        index: articleIndex,
+                        startTime: articleStartTime 
+                    });
+                }
+            }
+            
+            // If we have active jobs, wait for at least one to complete
+            if (activeJobs.length > 0) {
+                // Create an array of promises that resolve when jobs complete
+                const promises = activeJobs.map(job => job.promise);
+                
+                // Wait for at least one job to complete
+                await Promise.race(promises);
+                
+                // Remove completed jobs from active pool
+                const stillRunning = [];
+                
+                // Check each job to see if it's still running
+                for (const job of activeJobs) {
+                    const isResolved = await Promise.race([
+                        job.promise.then(() => true, () => true),
+                        new Promise(resolve => setTimeout(() => resolve(false), 0))
+                    ]);
+                    
+                    if (!isResolved) {
+                        stillRunning.push(job);
+                    }
+                }
+                
+                // Update active jobs to only include those still running
+                activeJobs.length = 0;
+                activeJobs.push(...stillRunning);
+                
+                // Update status with current jobs
+                updateConcurrentJobsStatus();
+            }
+        }
+        
+        // All jobs are complete
+        kbScrapeComplete = true;
+        kbScrapeProgressBar.style.width = '100%';
+        kbScrapeProgressBar.classList.remove('progress-bar-animated');
+        kbScrapeStatus.textContent = `Scraping complete. ${kbScrapeResults.filter(r => r.status === 'success').length} of ${urls.length} articles processed successfully.`;
+        kbScrapeCurrentProgressPercentage.textContent = '100%';
+        
+    } catch (error) {
+        console.error('Error in knowledge base scraping:', error);
+        kbScrapeStatus.textContent = `Error: ${error.message}`;
+        kbScrapeStatus.classList.add('text-danger');
+    } finally {
+        loadingOverlay.classList.add('d-none');
+    }
+}
+
+// Process a single knowledge base article with the scrape endpoint
+async function processKbScrapeArticle(url, currentIndex, totalArticles) {
+    try {
+        // Update progress for this article
+        kbScrapeProgressBar.style.width = '10%';
+        kbScrapeCurrentProgressPercentage.textContent = '10%';
+        
+        kbScrapeStatus.textContent = `Scraping article ${currentIndex} of ${totalArticles}...`;
+        kbScrapeProgressBar.style.width = '20%';
+        kbScrapeCurrentProgressPercentage.textContent = '20%';
+        
+        console.log(`Scraping knowledge base article from: ${url}`);
+        
+        // Call the Firecrawl scrape API
+        const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${API_KEY}`
+            },
+            body: JSON.stringify({
+                url: url,
+                formats: ['markdown'],
+                onlyMainContent: true,
+                removeBase64Images: true,
+                blockAds: true
+            })
+        });
+        
+        if (!scrapeResponse.ok) {
+            const errorText = await scrapeResponse.text();
+            throw new Error(`Scrape API failed with status ${scrapeResponse.status}: ${errorText}`);
+        }
+        
+        const scrapeResult = await scrapeResponse.json();
+        console.log('Scrape API response:', scrapeResult);
+        
+        // Update progress
+        kbScrapeProgressBar.style.width = '80%';
+        kbScrapeCurrentProgressPercentage.textContent = '80%';
+        
+        // Check if we have markdown data
+        if (scrapeResult.success && scrapeResult.data && scrapeResult.data.markdown) {
+            // Clean up the markdown by removing related/trending articles sections
+            const cleanMarkdown = cleanupMarkdownContent(scrapeResult.data.markdown);
+            
+            // Parse the markdown to extract metadata
+            const parsedData = parseMarkdownMetadata(cleanMarkdown, url);
+            
+            kbScrapeStatus.textContent = `Scraping complete for article ${currentIndex}. Processing results...`;
+            kbScrapeProgressBar.style.width = '90%';
+            kbScrapeCurrentProgressPercentage.textContent = '90%';
+            
+            // Add to results with success
+            addKbScrapeResult({
+                url: url,
+                category: parsedData.category || '',
+                article_name: parsedData.title || '',
+                published_date: parsedData.publishDate || '',
+                markdown: cleanMarkdown,
+                status: 'success'
+            });
+            
+            return true;
+        } else {
+            console.warn(`No markdown in scrape results for article ${url}:`, scrapeResult);
+            
+            // Add to results with error
+            addKbScrapeResult({
+                url: url,
+                category: '',
+                article_name: '',
+                published_date: '',
+                markdown: '',
+                error: 'No markdown content scraped',
+                status: 'error'
+            });
+            
+            return false;
+        }
+    } catch (error) {
+        console.error(`Scrape API request failed for article ${url}:`, error);
+        throw error;
+    }
+}
+
+// Remove related articles and trending articles from markdown content
+// Also remove boilerplate content before the main content
+function cleanupMarkdownContent(markdown) {
+    if (!markdown) return '';
+    
+    // First, remove content before "Skip to Main Content"
+    let contentAfterSkip = markdown;
+    const skipToMainContentRegex = /\[Skip to Main Content\]|\[Skip to Main Content\]\(.*?\)|Skip to Main Content/i;
+    const skipToMainMatch = markdown.match(skipToMainContentRegex);
+    
+    if (skipToMainMatch) {
+        // Find the position of the match, then find the end of that line
+        const matchPos = skipToMainMatch.index;
+        const endOfLinePos = markdown.indexOf('\n', matchPos);
+        
+        if (endOfLinePos !== -1) {
+            // Only keep content after this line
+            contentAfterSkip = markdown.substring(endOfLinePos + 1);
+        }
+    }
+    
+    // Now process the remaining content to remove Related/Trending articles
+    const lines = contentAfterSkip.split('\n');
+    const cleanedLines = [];
+    
+    let inRelatedArticlesSection = false;
+    let inTrendingArticlesSection = false;
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // Check if this line starts a section we want to exclude
+        if (line.trim().match(/^##?\s*Related\s*Articles/i)) {
+            inRelatedArticlesSection = true;
+            continue;
+        }
+        
+        if (line.trim().match(/^##?\s*Trending\s*Articles/i)) {
+            inTrendingArticlesSection = true;
+            continue;
+        }
+        
+        // Check if we're entering a new section which ends the section we're excluding
+        if ((inRelatedArticlesSection || inTrendingArticlesSection) && 
+            line.trim().match(/^#{1,6}\s+/)) {
+            inRelatedArticlesSection = false;
+            inTrendingArticlesSection = false;
+        }
+        
+        // Only include the line if we're not in an excluded section
+        if (!inRelatedArticlesSection && !inTrendingArticlesSection) {
+            cleanedLines.push(line);
+        }
+    }
+    
+    return cleanedLines.join('\n');
+}
+
+// Parse markdown content to extract metadata (title, category, date)
+function parseMarkdownMetadata(markdown, url) {
+    const result = {
+        title: '',
+        category: '',
+        publishDate: ''
+    };
+    
+    if (!markdown) return result;
+    
+    const lines = markdown.split('\n');
+    
+    // Look for the title (first h1 or h2)
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim().startsWith('# ')) {
+            result.title = lines[i].trim().replace(/^# /, '');
+            break;
+        } else if (lines[i].trim().startsWith('## ') && !result.title) {
+            result.title = lines[i].trim().replace(/^## /, '');
+            break;
+        }
+    }
+    
+    // Look for category (usually mentioned with "Category" or in the header)
+    const categoryLine = lines.find(line => 
+        line.match(/category/i) || 
+        line.match(/section/i)
+    );
+    
+    if (categoryLine) {
+        const match = categoryLine.match(/:\s*([^,\n]+)/);
+        if (match && match[1]) {
+            result.category = match[1].trim();
+        }
+    }
+    
+    // Look for published date (usually mentioned with "Date" or similar)
+    const dateLine = lines.find(line => 
+        line.match(/date/i) || 
+        line.match(/published/i) ||
+        line.match(/created/i)
+    );
+    
+    if (dateLine) {
+        // Look for date patterns in the line
+        const dateMatch = dateLine.match(/\b(\d{1,2})\s*(\/|-)\s*(\d{1,2})\s*(\/|-)\s*(\d{2,4})\b/) || 
+                         dateLine.match(/\b(\w{3,9})\s+(\d{1,2})(,|\s)+(\d{4})\b/);
+        
+        if (dateMatch) {
+            result.publishDate = dateMatch[0].trim();
+        }
+    }
+    
+    // Try to get a content preview for display
+    let contentLines = lines.filter(line => 
+        !line.startsWith('#') && 
+        line.trim().length > 0 &&
+        !line.match(/^---+$/) && 
+        !line.includes('URL Name')
+    );
+    
+    // Set placeholder values if we couldn't find metadata
+    if (!result.title) {
+        // Try to extract title from the URL
+        try {
+            const urlObj = new URL(url);
+            const pathParts = urlObj.pathname.split('/').filter(Boolean);
+            if (pathParts.length > 0) {
+                result.title = pathParts[pathParts.length - 1]
+                    .replace(/-/g, ' ')
+                    .replace(/\b\w/g, l => l.toUpperCase()); // Capitalize words
+            }
+        } catch (e) {
+            result.title = 'Untitled Article';
+        }
+    }
+    
+    if (!result.category && contentLines.length > 0) {
+        // Try to guess category from content
+        for (const line of contentLines) {
+            if (line.includes('Category:') || line.includes('Section:')) {
+                const match = line.match(/(?:Category|Section):\s*([^,\n]+)/i);
+                if (match && match[1]) {
+                    result.category = match[1].trim();
+                    break;
+                }
+            }
+        }
+        
+        if (!result.category) {
+            result.category = 'General';
+        }
+    }
+    
+    return result;
+}
+
+// Add a knowledge base scrape result to the table
+function addKbScrapeResult(result) {
+    // Add to the results array
+    kbScrapeResults.push(result);
+    
+    // Generate unique ID for this result
+    const resultId = `kb-scrape-result-${kbScrapeResults.length}`;
+    result.id = resultId;
+    
+    // Add a row to the table
+    const row = document.createElement('tr');
+    row.setAttribute('data-result-id', resultId);
+    
+    // URL cell
+    const urlCell = document.createElement('td');
+    urlCell.textContent = result.url;
+    row.appendChild(urlCell);
+    
+    // Category cell
+    const categoryCell = document.createElement('td');
+    categoryCell.textContent = result.category || '-';
+    row.appendChild(categoryCell);
+    
+    // Article Name cell
+    const nameCell = document.createElement('td');
+    nameCell.textContent = result.article_name || '-';
+    row.appendChild(nameCell);
+    
+    // Published Date cell
+    const dateCell = document.createElement('td');
+    dateCell.textContent = result.published_date || '-';
+    row.appendChild(dateCell);
+    
+    // Content Preview cell
+    const contentCell = document.createElement('td');
+    if (result.status === 'success' && result.markdown) {
+        // Create a preview of the content (first 100 characters)
+        const contentLines = result.markdown.split('\n').filter(line => 
+            !line.startsWith('#') && 
+            line.trim().length > 10 &&
+            !line.includes('---')
+        );
+        
+        const contentPreview = contentLines.length > 0 
+            ? contentLines[0].substring(0, 100) + (contentLines[0].length > 100 ? '...' : '')
+            : 'No preview available';
+        
+        contentCell.textContent = contentPreview;
+    } else {
+        contentCell.textContent = '-';
+    }
+    row.appendChild(contentCell);
+    
+    // Markdown button cell
+    const markdownCell = document.createElement('td');
+    if (result.status === 'success' && result.markdown) {
+        const viewBtn = document.createElement('button');
+        viewBtn.className = 'btn btn-sm btn-secondary';
+        viewBtn.textContent = 'View';
+        viewBtn.addEventListener('click', () => showMarkdownModal(result));
+        markdownCell.appendChild(viewBtn);
+    } else {
+        markdownCell.textContent = '-';
+    }
+    row.appendChild(markdownCell);
+    
+    // HTML button cell
+    const htmlCell = document.createElement('td');
+    if (result.status === 'success' && result.markdown) {
+        const viewBtn = document.createElement('button');
+        viewBtn.className = 'btn btn-sm btn-secondary';
+        viewBtn.textContent = 'View';
+        viewBtn.addEventListener('click', () => showHtmlModal(result));
+        htmlCell.appendChild(viewBtn);
+    } else {
+        htmlCell.textContent = '-';
+    }
+    row.appendChild(htmlCell);
+    
+    // Status cell
+    const statusCell = document.createElement('td');
+    if (result.status === 'success') {
+        statusCell.textContent = 'Success';
+        statusCell.classList.add('text-success');
+    } else {
+        statusCell.textContent = 'Error';
+        statusCell.classList.add('text-danger');
+        statusCell.setAttribute('title', result.error || 'Unknown error');
+    }
+    row.appendChild(statusCell);
+    
+    // Add the row to the table
+    kbScrapeResultsTableBody.appendChild(row);
+}
+
+// Show the markdown modal with the markdown content
+function showMarkdownModal(result) {
+    // Get the modal elements
+    const modal = document.getElementById('kbScrapeMarkdownModal');
+    const modalTitle = document.getElementById('kbScrapeMarkdownModalLabel');
+    const markdownContent = document.getElementById('markdownContent');
+    
+    // Set the modal title
+    modalTitle.textContent = result.article_name || 'Article Markdown';
+    
+    // Populate the markdown content
+    markdownContent.textContent = result.markdown || 'No markdown content available.';
+    
+    // Show the modal
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+}
+
+// Show the HTML modal with the HTML preview
+function showHtmlModal(result) {
+    // Get the modal elements
+    const modal = document.getElementById('kbScrapeHtmlModal');
+    const modalTitle = document.getElementById('kbScrapeHtmlModalLabel');
+    const htmlPreviewContent = document.getElementById('scrapedHtmlPreviewContent');
+    const htmlCodeContent = document.getElementById('scrapedHtmlCodeContent');
+    
+    // Set the modal title
+    modalTitle.textContent = result.article_name || 'Article HTML';
+    
+    // Convert markdown to HTML using marked.js
+    const htmlContent = marked.parse(result.markdown || '');
+    
+    // Populate the HTML preview
+    htmlPreviewContent.innerHTML = htmlContent;
+    
+    // Populate the HTML code view (escaped)
+    htmlCodeContent.textContent = htmlContent;
+    
+    // Show the modal
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+}
+
+// Start KB scrape progress tracking
+function startKbScrapeProgressTracking(totalArticles) {
+    kbScrapeStartTime = Date.now();
+    totalScrapesToProcess = totalArticles;
+    processedScrapeCount = 0;
+    scrapeProcessingTimes = [];
+    
+    // Reset UI
+    kbScrapeGlobalProgressBar.style.width = '0%';
+    kbScrapeGlobalProgressPercentage.textContent = '0%';
+    kbScrapeGlobalStatusStats.textContent = `Processing 0 of ${totalArticles} articles`;
+    kbScrapeElapsedTime.textContent = 'Elapsed: 0s';
+    kbScrapeEstimatedTime.textContent = 'Est. remaining: --';
+    
+    // Start the timer to update elapsed time
+    if (kbScrapeProgressTimer) {
+        clearInterval(kbScrapeProgressTimer);
+    }
+    
+    kbScrapeProgressTimer = setInterval(() => {
+        if (!kbScrapeStartTime) return;
+        
+        // Update elapsed time
+        const elapsed = Date.now() - kbScrapeStartTime;
+        kbScrapeElapsedTime.textContent = `Elapsed: ${formatTime(elapsed)}`;
+        
+        // Calculate estimated remaining time if we have at least one article processed
+        if (processedScrapeCount > 0 && scrapeProcessingTimes.length > 0) {
+            // Calculate average time per article
+            const avgTimePerArticle = scrapeProcessingTimes.reduce((a, b) => a + b, 0) / scrapeProcessingTimes.length;
+            
+            // Estimate remaining time
+            const remainingArticles = totalScrapesToProcess - processedScrapeCount;
+            const estimatedRemainingTime = avgTimePerArticle * remainingArticles;
+            
+            kbScrapeEstimatedTime.textContent = `Est. remaining: ${formatTime(estimatedRemainingTime)}`;
+        }
+    }, 1000);
+}
+
+// Update KB scrape progress when an article is processed
+function updateKbScrapeProgress(success = true, processingTime = null) {
+    if (!kbScrapeStartTime) return;
+    
+    processedScrapeCount++;
+    
+    // Record processing time for this article
+    if (processingTime) {
+        scrapeProcessingTimes.push(processingTime);
+    }
+    
+    // Calculate and update progress percentage
+    const progressPercent = Math.round((processedScrapeCount / totalScrapesToProcess) * 100);
+    kbScrapeGlobalProgressBar.style.width = `${progressPercent}%`;
+    kbScrapeGlobalProgressPercentage.textContent = `${progressPercent}%`;
+    
+    // Update status text
+    kbScrapeGlobalStatusStats.textContent = `Processing ${processedScrapeCount} of ${totalScrapesToProcess} articles`;
+    
+    // Check if we're done
+    if (processedScrapeCount >= totalScrapesToProcess) {
+        finishKbScrapeProgress();
+    }
+}
+
+// End KB scrape progress tracking
+function finishKbScrapeProgress() {
+    if (kbScrapeProgressTimer) {
+        clearInterval(kbScrapeProgressTimer);
+        kbScrapeProgressTimer = null;
+    }
+    
+    // Calculate final stats
+    if (kbScrapeStartTime) {
+        const totalTime = Date.now() - kbScrapeStartTime;
+        kbScrapeElapsedTime.textContent = `Total time: ${formatTime(totalTime)}`;
+        kbScrapeEstimatedTime.textContent = `Avg. per article: ${formatTime(totalTime / totalScrapesToProcess)}`;
+        
+        // Show success percentage
+        const successCount = kbScrapeResults.filter(r => r.status === 'success').length;
+        const successRate = Math.round((successCount / totalScrapesToProcess) * 100);
+        kbScrapeGlobalStatusStats.textContent = `Completed: ${successCount} of ${totalScrapesToProcess} articles (${successRate}% success)`;
+    }
+    
+    kbScrapeStartTime = null;
+}
+
+// Download KB scrape results as a CSV file
+function downloadKbScrapeResults() {
+    if (kbScrapeResults.length === 0) {
+        alert('No results to download.');
+        return;
+    }
+    
+    // Define CSV headers
+    const headers = ['URL', 'Category', 'Article Name', 'Published Date', 'Markdown Content', 'HTML Content', 'Status', 'Error'];
+    
+    // Create CSV content
+    let csvContent = headers.join(',') + '\n';
+    
+    // Add each result as a row
+    kbScrapeResults.forEach(result => {
+        // Format content as string preserving structure
+        let markdownStr = '';
+        if (result.markdown) {
+            markdownStr = `"${result.markdown.replace(/"/g, '""')}"`;
+        }
+        
+        // Generate HTML content for successful extractions
+        let htmlContent = '';
+        if (result.status === 'success' && result.markdown) {
+            try {
+                htmlContent = `"${marked.parse(result.markdown).replace(/"/g, '""')}"`;
+            } catch (e) {
+                htmlContent = '"Error generating HTML"';
+            }
+        }
+        
+        const row = [
+            `"${result.url.replace(/"/g, '""')}"`,
+            `"${(result.category || '').replace(/"/g, '""')}"`,
+            `"${(result.article_name || '').replace(/"/g, '""')}"`,
+            `"${(result.published_date || '').replace(/"/g, '""')}"`,
+            markdownStr,
+            htmlContent,
+            result.status === 'success' ? 'Success' : 'Error',
+            result.status === 'error' ? `"${(result.error || 'Unknown error').replace(/"/g, '""')}"` : ''
+        ];
+        
+        csvContent += row.join(',') + '\n';
+    });
+    
+    // Create a blob and download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'knowledge_base_scrape_results.csv');
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
 // Rank URLs by importance
