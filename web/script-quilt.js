@@ -2017,8 +2017,210 @@ function parseMarkdownMetadata(markdown, url) {
     return result;
 }
 
+// Enhanced extraction of category and publish date from markdown or HTML content
+function extractCategoryAndDateFromContent(content, existingCategory = '', existingDate = '') {
+    // Initialize with existing values
+    let category = existingCategory;
+    let publishDate = existingDate;
+    
+    // Return early if no content
+    if (!content) return { category, publishDate };
+    
+    // Only process if we're missing values
+    const needCategory = !category || category === 'General' || category === '-' || category === 'Import' || category === 'End of Day';
+    const needDate = !publishDate || publishDate === '-';
+    
+    if (!needCategory && !needDate) return { category, publishDate };
+    
+    // Split content by lines for easier processing
+    const lines = content.split('\n');
+    
+    // Only process the first 50 lines to avoid excessive searching
+    const linesToProcess = lines.slice(0, 50);
+    
+    // Date extraction patterns - we do this first since we may use the date location to find categories
+    let dateLineIndex = -1;
+    let dateMatch = null;
+    
+    if (needDate) {
+        // Match common date formats
+        const datePatterns = [
+            // Date explicitly labeled
+            /published\s+(?:on|date)?:?\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i,
+            /date:?\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i,
+            /created:?\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4})/i,
+            
+            // Different date formats
+            /(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/,                             // 10/25/2023, 10-25-2023
+            /([A-Za-z]+\s+\d{1,2},?\s+\d{4})/,                               // October 25, 2023
+            /(\d{1,2}\s+[A-Za-z]+\s+\d{4})/,                                 // 25 October 2023
+            /(\d{4}-\d{2}-\d{2})/                                            // 2023-10-25 (ISO format)
+        ];
+        
+        // Try each pattern until we find a match
+        for (const pattern of datePatterns) {
+            for (let i = 0; i < linesToProcess.length; i++) {
+                const line = linesToProcess[i];
+                const match = line.match(pattern);
+                if (match && match[1]) {
+                    publishDate = match[1].trim();
+                    dateLineIndex = i;
+                    dateMatch = match;
+                    break;
+                }
+            }
+            if (publishDate && publishDate !== '-') break;
+        }
+    }
+    
+    // Category extraction - with improved logic for finding categories near dates
+    if (needCategory) {
+        // First look for the word "Knowledge" since it's a common category shown in screenshots
+        const knowledgePattern = /\bKnowledge\b/i;
+        for (const line of linesToProcess) {
+            if (knowledgePattern.test(line)) {
+                category = "Knowledge";
+                console.log(`Found Knowledge category directly: "${line}"`);
+                break;
+            }
+        }
+        
+        // If not found yet, look for explicit category/section labels
+        if (!category || category === 'General' || category === '-' || category === 'Import' || category === 'End of Day') {
+            const categoryPatterns = [
+                /category\s*:\s*([^,\n]+)/i,
+                /section\s*:\s*([^,\n]+)/i,
+                /topic\s*:\s*([^,\n]+)/i,
+                /^category\s*[:-]\s*(.+)$/im,
+                /^section\s*[:-]\s*(.+)$/im,
+                /^in category:?\s*(.+)$/im,
+                /^filed under:?\s*(.+)$/im
+            ];
+            
+            // Try each pattern until we find a match
+            for (const pattern of categoryPatterns) {
+                for (const line of linesToProcess) {
+                    const match = line.match(pattern);
+                    if (match && match[1]) {
+                        // Clean up the category
+                        category = match[1].trim();
+                        if (category) break;
+                    }
+                }
+                if (category && category !== 'General' && category !== '-' && 
+                    category !== 'Import' && category !== 'End of Day') break;
+            }
+        }
+        
+        // If we found a date, look for categories near that date
+        if (dateLineIndex >= 0 && (!category || category === 'General' || category === '-' || 
+                                 category === 'Import' || category === 'End of Day')) {
+            const dateLine = linesToProcess[dateLineIndex];
+            
+            // 1. Check for a category in the same line as the date
+            // Look for a category before the date in the same line
+            const beforeDateText = dateLine.substring(0, dateMatch.index).trim();
+            if (beforeDateText) {
+                // Look for a short phrase (1-2 words) that could be a category
+                // Remove common non-category phrases
+                const beforeDateClean = beforeDateText
+                    .replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, '') // Remove non-alphanumeric at start/end
+                    .replace(/^(on|by|the|in|at|from|to|with|and|or|for|of)(\s+|$)/i, '') // Remove common prepositions at start
+                    .trim();
+                
+                // If it's a short phrase (1-3 words) and not empty, it might be a category
+                if (beforeDateClean && beforeDateClean.split(/\s+/).length <= 3 && beforeDateClean.length > 2) {
+                    category = beforeDateClean;
+                    console.log(`Found category before date: "${category}" in line: "${dateLine}"`);
+                }
+            }
+            
+            // 2. Check the line immediately before the date line
+            if ((!category || category === 'General' || category === '-' || 
+                 category === 'Import' || category === 'End of Day') && dateLineIndex > 0) {
+                const prevLine = linesToProcess[dateLineIndex - 1].trim();
+                // If it's a short line (likely just a category or title)
+                if (prevLine && prevLine.length < 50 && prevLine.length > 2 && !/^\d+$/.test(prevLine)) {
+                    // Extract the last word if it seems like a category (i.e., "Knowledge")
+                    const lastWord = prevLine.split(/\s+/).pop();
+                    if (lastWord && lastWord.length > 3) { // Ensure it's a substantive word
+                        category = lastWord;
+                        console.log(`Found category in line before date: "${category}" from line: "${prevLine}"`);
+                    } else {
+                        // Or use the whole line if it's short enough to be just a category
+                        if (prevLine.split(/\s+/).length <= 2) {
+                            category = prevLine;
+                            console.log(`Found category in line before date (whole line): "${category}"`);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // If still no category, check for breadcrumb-like patterns
+        if (!category || category === 'General' || category === '-' || 
+            category === 'Import' || category === 'End of Day') {
+            for (const line of linesToProcess) {
+                // Look for breadcrumb patterns with more detailed extraction
+                if (/[»>|\/\\]/.test(line) && line.length < 100) {
+                    const parts = line.split(/[»>|\/\\]/).map(p => p.trim()).filter(p => p);
+                    if (parts.length > 1) {
+                        // Prefer the second part (usually the category after Home)
+                        // But avoid "Home" as the category
+                        for (let i = 1; i < parts.length; i++) {
+                            if (parts[i] && !/^home$/i.test(parts[i]) && parts[i].length > 2) {
+                                category = parts[i];
+                                console.log(`Found category from breadcrumb: "${category}" from line: "${line}"`);
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (category && category !== 'General' && category !== '-' && 
+                    category !== 'Import' && category !== 'End of Day') break;
+            }
+        }
+    }
+    
+    return { category, publishDate };
+}
+
 // Add a knowledge base scrape result to the table
 function addKbScrapeResult(result) {
+    // Try to extract better category and date data if fields are empty or generic
+    if (result.status === 'success' && result.markdown) {
+        const needsExtraction = 
+            !result.category || 
+            result.category === 'General' || 
+            result.category === '-' ||
+            !result.published_date || 
+            result.published_date === '-';
+            
+        if (needsExtraction) {
+            console.log(`Performing enhanced metadata extraction for article: ${result.url}`);
+            
+            // Extract from markdown first (most reliable)
+            const enhancedData = extractCategoryAndDateFromContent(
+                result.markdown, 
+                result.category, 
+                result.published_date
+            );
+            
+            // Use the enhanced data only if original fields were empty/default
+            if ((!result.category || result.category === 'General' || result.category === '-') && 
+                enhancedData.category && enhancedData.category !== 'General' && enhancedData.category !== '-') {
+                console.log(`Enhanced extraction found category: "${enhancedData.category}" (was: "${result.category}")`);
+                result.category = enhancedData.category;
+            }
+            
+            if ((!result.published_date || result.published_date === '-') && 
+                enhancedData.publishDate && enhancedData.publishDate !== '-') {
+                console.log(`Enhanced extraction found publish date: "${enhancedData.publishDate}" (was: "${result.published_date}")`);
+                result.published_date = enhancedData.publishDate;
+            }
+        }
+    }
+    
     // Add to the results array
     kbScrapeResults.push(result);
     
