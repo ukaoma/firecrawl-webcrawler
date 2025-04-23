@@ -1800,7 +1800,8 @@ async function processKbScrapeArticle(url, currentIndex, totalArticles) {
                 formats: ['markdown'],
                 onlyMainContent: true,
                 removeBase64Images: true,
-                blockAds: true
+                blockAds: true,
+                waitFor: 2000 // Wait 2 seconds before scraping to allow JS content to load
             })
         });
         
