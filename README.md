@@ -113,10 +113,7 @@ firecrawl-webcrawler/
 
 ## API Information
 
-This application uses the Firecrawl API with the following key:
-```
-fc-4bd96b21a1fa459a9336127ab8974234
-```
+This application uses the Firecrawl API 
 
 ## Documentation
 
