@@ -58,6 +58,16 @@
 02536
 02723
 Or: 02532, 02536, 02723"></textarea>
+                                
+                                <div class="card-footer mt-3">
+                                    <div class="form-check mb-3">
+                                        <input class="form-check-input" type="checkbox" id="batchProcessingCheck" checked>
+                                        <label class="form-check-label" for="batchProcessingCheck">
+                                            Process in batches of 5 (recommended for better reliability)
+                                        </label>
+                                    </div>
+                                    <button id="processButton" class="btn btn-primary">Process ZIP Codes</button>
+                                </div>
                             </div>
                             
                             <!-- Upload CSV Tab -->
@@ -76,6 +86,16 @@ Or: 02532, 02536, 02723"></textarea>
                                             <!-- CSV preview content will be inserted here -->
                                         </table>
                                     </div>
+                                </div>
+                                
+                                <div class="card-footer mt-3">
+                                    <div class="form-check mb-3">
+                                        <input class="form-check-input" type="checkbox" id="csvBatchProcessingCheck" checked>
+                                        <label class="form-check-label" for="csvBatchProcessingCheck">
+                                            Process in batches of 5 (recommended for better reliability)
+                                        </label>
+                                    </div>
+                                    <button id="processCsvButton" class="btn btn-primary">Process ZIP Codes</button>
                                 </div>
                             </div>
                             
@@ -227,6 +247,17 @@ https://knowledge.example.com/article3"></textarea>
                             
                             <!-- KB Scrape Tab -->
                             <div class="tab-pane fade" id="kb-scrape" role="tabpanel">
+                                <style>
+                                    /* Hide any ZIP-related elements in KB Scrape tab */
+                                    #kb-scrape .form-check, 
+                                    #kb-scrape button[id^="process"]:not(#processKbScrapeUrlsButton),
+                                    #kb-scrape ~ #zipCodeFooter,
+                                    #kb-scrape div[id^="batchProcessing"],
+                                    #kb-scrape .card-footer,
+                                    #kb-scrape > .form-check {
+                                        display: none !important;
+                                    }
+                                </style>
                                 <div class="alert alert-info mb-3">
                                     <strong>KB Scraper</strong> - Better for scraping JavaScript-heavy Salesforce Knowledge Base pages. Uses the <code>/scrape</code> endpoint with markdown output.
                                 </div>
@@ -237,7 +268,9 @@ https://knowledge.example.com/article1,
 https://knowledge.example.com/article2, 
 https://knowledge.example.com/article3"></textarea>
                                 
-                                <button id="processKbScrapeUrlsButton" class="btn btn-primary">Scrape Knowledge Base Articles</button>
+                                <div class="mb-3">
+                                    <button id="processKbScrapeUrlsButton" class="btn btn-primary">Scrape Knowledge Base Articles</button>
+                                </div>
                                 
                                 <!-- KB Scrape Results Section -->
                                 <div id="kbScrapeResultsSection" class="d-none mt-4">
@@ -354,6 +387,62 @@ https://knowledge.example.com/article3"></textarea>
                                 </div>
                             </div>
                             
+                            <!-- Remove ZIP Code processing elements from tabs other than Paste ZIP Codes -->
+                            <script>
+                                // When DOM is fully loaded, handle tabs display and functionality
+                                document.addEventListener('DOMContentLoaded', function() {
+                                    // Initialize event handlers for the ZIP Codes tab
+                                    const processButton = document.getElementById('processButton');
+                                    if (processButton) {
+                                        processButton.addEventListener('click', function() {
+                                            processZipCodes('paste');
+                                        });
+                                    }
+                                    
+                                    // Initialize event handlers for the CSV upload tab
+                                    const processCsvButton = document.getElementById('processCsvButton');
+                                    if (processCsvButton) {
+                                        processCsvButton.addEventListener('click', function() {
+                                            processZipCodes('csv');
+                                        });
+                                    }
+                                    
+                                    // Add event listener for tab changes if the tabs exist
+                                    const inputTabs = document.getElementById('inputTabs');
+                                    if (inputTabs) {
+                                        inputTabs.addEventListener('shown.bs.tab', function(e) {
+                                            // Clean up any inappropriate elements in KB Scrape tab
+                                            if (e.target.id === 'kb-scrape-tab') {
+                                                const duplicateButtons = document.querySelectorAll('#kb-scrape button:not(#processKbScrapeUrlsButton):not(#downloadKbScrapeResultsButton)');
+                                                duplicateButtons.forEach(button => {
+                                                    if (button.textContent.includes('Process ZIP Codes')) {
+                                                        button.style.display = 'none';
+                                                    }
+                                                });
+                                            }
+                                        });
+                                    }
+                                    
+                                    // Helper function to process ZIP codes from different sources
+                                    function processZipCodes(source) {
+                                        console.log('Processing ZIP codes from', source);
+                                        // Show the results section if it exists
+                                        const resultsSection = document.getElementById('resultsSection');
+                                        if (resultsSection) {
+                                            resultsSection.classList.remove('d-none');
+                                        } else {
+                                            console.log('Results section not found');
+                                        }
+                                        
+                                        // Show processing status
+                                        const statusElement = document.getElementById('processingStatus');
+                                        if (statusElement) {
+                                            statusElement.textContent = `Processing ZIP codes from ${source}...`;
+                                        }
+                                    }
+                                });
+                            </script>
+                            
                             <!-- Bulk Extract Tab -->
                             <div class="tab-pane fade" id="bulk-extract" role="tabpanel">
                                 <p>Enter website URLs (comma-separated) to extract data from:</p>
@@ -435,15 +524,7 @@ Navigate through the product listings by clicking the 'Next Page' button until d
                             </div>
                         </div>
                     </div>
-                    <div class="card-footer" id="zipCodeFooter">
-                        <div class="form-check mb-3">
-                            <input class="form-check-input" type="checkbox" id="batchProcessingCheck" checked>
-                            <label class="form-check-label" for="batchProcessingCheck">
-                                Process in batches of 5 (recommended for better reliability)
-                            </label>
-                        </div>
-                        <button id="processButton" class="btn btn-primary">Process ZIP Codes</button>
-                    </div>
+                    <!-- ZIP Code processing is only needed for the Paste ZIP Codes tab -->
                 </div>
 
                 <!-- Results Section -->
@@ -493,6 +574,9 @@ Navigate through the product listings by clicking the 'Next Page' button until d
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.0/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="./enhanced_website_map.js"></script>
+    <script src="./enhanced-map-quilt-integration.js"></script>
     <script src="./script-quilt.js"></script>
+    <script src="./test-enhanced-map-quilt.js"></script>
 </body>
 </html>
