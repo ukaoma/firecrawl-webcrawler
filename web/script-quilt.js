@@ -118,6 +118,43 @@ let totalScrapesToProcess = 0;
 let scrapeProcessingTimes = [];
 let kbScrapeProgressTimer = null;
 
+// Enrichment Feature DOM Elements
+const enrichmentCsvFileInput = document.getElementById('enrichmentCsvFileInput');
+const enrichmentCsvPreview = document.getElementById('enrichmentCsvPreview');
+const enrichmentCsvPreviewTable = document.getElementById('enrichmentCsvPreviewTable');
+const enrichmentUrlColumnSection = document.getElementById('enrichmentUrlColumnSection');
+const enrichmentUrlColumnSelect = document.getElementById('enrichmentUrlColumnSelect');
+const enrichmentPromptSection = document.getElementById('enrichmentPromptSection');
+const enrichmentPromptInput = document.getElementById('enrichmentPromptInput');
+const enrichmentControls = document.getElementById('enrichmentControls');
+const processEnrichmentButton = document.getElementById('processEnrichmentButton');
+const enrichmentResultsSection = document.getElementById('enrichmentResultsSection');
+const enrichmentProgressBar = document.getElementById('enrichmentProgressBar');
+const enrichmentStatus = document.getElementById('enrichmentStatus');
+const enrichmentResultsTable = document.getElementById('enrichmentResultsTable');
+const enrichmentResultsTableHead = document.getElementById('enrichmentResultsTableHead');
+const enrichmentResultsTableBody = document.getElementById('enrichmentResultsTableBody');
+const downloadEnrichmentResultsButton = document.getElementById('downloadEnrichmentResultsButton');
+const enrichmentGlobalProgressBar = document.getElementById('enrichmentGlobalProgressBar');
+const enrichmentGlobalProgressText = document.getElementById('enrichmentGlobalProgressText');
+const enrichmentGlobalProgressPercentage = document.getElementById('enrichmentGlobalProgressPercentage');
+const enrichmentGlobalStatusStats = document.getElementById('enrichmentGlobalStatusStats');
+const enrichmentElapsedTime = document.getElementById('enrichmentElapsedTime');
+const enrichmentEstimatedTime = document.getElementById('enrichmentEstimatedTime');
+const enrichmentCurrentProgressPercentage = document.getElementById('enrichmentCurrentProgressPercentage');
+
+// Enrichment Global Variables
+let enrichmentCsvData = [];
+let enrichmentCsvHeaders = [];
+let enrichmentResults = [];
+let enrichmentComplete = false;
+let enrichmentStartTime = null;
+let processedEnrichmentCount = 0;
+let totalEnrichmentToProcess = 0;
+let enrichmentProcessingTimes = [];
+let enrichmentProgressTimer = null;
+let selectedUrlColumn = '';
+
 // Initialize the page
 document.addEventListener('DOMContentLoaded', () => {
     // Set up event listeners
@@ -149,6 +186,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const htmlContent = document.getElementById('scrapedHtmlCodeContent').textContent;
             copyToClipboard(htmlContent, 'HTML copied to clipboard!');
         });
+    }
+    
+    // Enrichment event listeners
+    if (enrichmentCsvFileInput) {
+        enrichmentCsvFileInput.addEventListener('change', handleEnrichmentCSVUpload);
+    }
+    if (processEnrichmentButton) {
+        processEnrichmentButton.addEventListener('click', processEnrichment);
+    }
+    if (downloadEnrichmentResultsButton) {
+        downloadEnrichmentResultsButton.addEventListener('click', downloadEnrichmentResults);
     }
     
     // Set up FIRE-1 agent toggle
@@ -274,6 +322,672 @@ async function processZipCodes() {
     } finally {
         loadingOverlay.classList.add('d-none');
     }
+}
+
+// Process a single row for enrichment
+async function processSingleEnrichmentRow(row, prompt, currentIndex, totalRows) {
+    try {
+        // Update progress for this row
+        enrichmentProgressBar.style.width = '10%';
+        enrichmentCurrentProgressPercentage.textContent = '10%';
+        
+        // Build context from the row data
+        const rowContext = Object.entries(row)
+            .map(([key, value]) => `${key}: ${value}`)
+            .join(', ');
+        
+        let enrichmentData = {};
+        
+        // Check if we have a URL to crawl
+        if (selectedUrlColumn && row[selectedUrlColumn]) {
+            const url = row[selectedUrlColumn].toString().trim();
+            
+            // Validate URL
+            try {
+                new URL(url);
+                
+                // Call the Firecrawl API with row context
+                enrichmentData = await extractEnrichmentDataFromUrl(url, prompt, rowContext);
+                
+            } catch (urlError) {
+                console.warn(`Invalid URL in row ${currentIndex}: ${url}`);
+                
+                // Fallback to text-only enrichment
+                enrichmentData = await extractEnrichmentDataFromText(prompt, rowContext);
+            }
+        } else {
+            // Text-only enrichment without URL
+            enrichmentData = await extractEnrichmentDataFromText(prompt, rowContext);
+        }
+        
+        // Update progress for this row
+        enrichmentProgressBar.style.width = '100%';
+        enrichmentCurrentProgressPercentage.textContent = '100%';
+        
+        // Add enriched result to the table
+        addEnrichmentResult({
+            ...row,
+            enrichment_data: enrichmentData,
+            status: 'success'
+        });
+        
+        return true;
+    } catch (error) {
+        console.error(`Error enriching row ${currentIndex}:`, error);
+        
+        // Add error result to the table
+        addEnrichmentResult({
+            ...row,
+            enrichment_data: {},
+            error: error.message,
+            status: 'error'
+        });
+        
+        return false;
+    }
+}
+
+// Extract enrichment data from a URL using the Firecrawl API with retry logic
+async function extractEnrichmentDataFromUrl(url, prompt, rowContext) {
+    console.log(`Enriching data from URL: ${url}`);
+    
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS = [2000, 5000, 10000]; // 2s, 5s, 10s
+    
+    for (let retryAttempt = 0; retryAttempt <= MAX_RETRIES; retryAttempt++) {
+        try {
+            // Build the full prompt with row context
+            const fullPrompt = `Given the following business information: ${rowContext}
+            
+${prompt}
+
+Please provide the enrichment data based on both the existing information and the website content.`;
+            
+            // Parse user prompt to determine expected fields
+            const expectedFields = parseEnrichmentFields(prompt);
+            const schemaProperties = {};
+            
+            // Build a dynamic schema based on the enrichment prompt
+            expectedFields.forEach(field => {
+                schemaProperties[field] = { type: ["string", "number", "null"] };
+            });
+            
+            const schema = {
+                type: "object",
+                properties: schemaProperties,
+                additionalProperties: false
+            };
+            
+            const jobSubmissionResponse = await fetch('https://api.firecrawl.dev/v1/extract', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${API_KEY}`
+                },
+                body: JSON.stringify({
+                    urls: [url],
+                    prompt: fullPrompt,
+                    schema: schema
+                })
+            });
+            
+            // Handle different types of API errors
+            if (!jobSubmissionResponse.ok) {
+                const errorText = await jobSubmissionResponse.text();
+                const status = jobSubmissionResponse.status;
+                
+                // Check if this is a retryable error
+                if (status === 500 || status === 502 || status === 503 || status === 504) {
+                    if (retryAttempt < MAX_RETRIES) {
+                        const delay = RETRY_DELAYS[retryAttempt];
+                        console.warn(`Server error ${status} for ${url}, retrying in ${delay}ms (attempt ${retryAttempt + 1}/${MAX_RETRIES + 1})`);
+                        await sleep(delay);
+                        continue; // Retry the request
+                    } else {
+                        throw new Error(`Server error ${status} after ${MAX_RETRIES + 1} attempts: ${errorText}`);
+                    }
+                } else if (status === 429) {
+                    // Rate limit error - wait longer before retrying
+                    if (retryAttempt < MAX_RETRIES) {
+                        const delay = 60000; // Wait 60 seconds for rate limit
+                        console.warn(`Rate limit hit for ${url}, waiting ${delay}ms before retry (attempt ${retryAttempt + 1}/${MAX_RETRIES + 1})`);
+                        await sleep(delay);
+                        continue;
+                    } else {
+                        throw new Error(`Rate limit exceeded after ${MAX_RETRIES + 1} attempts: ${errorText}`);
+                    }
+                } else {
+                    // Non-retryable error (4xx client errors, etc.)
+                    throw new Error(`API job submission failed with status ${status}: ${errorText}`);
+                }
+            }
+            
+            const jobResponse = await jobSubmissionResponse.json();
+            const jobId = jobResponse.id;
+            if (!jobId) {
+                throw new Error('No job ID returned from API');
+            }
+            
+            // Poll for job completion with improved error handling
+            const MAX_POLLING_ATTEMPTS = 30;
+            const POLLING_INTERVAL_MS = 2500;
+            
+            let attempts = 0;
+            let jobComplete = false;
+            let extractionResults = null;
+            let pollingErrors = 0;
+            const MAX_POLLING_ERRORS = 5;
+            
+            while (!jobComplete && attempts < MAX_POLLING_ATTEMPTS) {
+                attempts++;
+                
+                try {
+                    const statusResponse = await fetch(`https://api.firecrawl.dev/v1/extract/${jobId}`, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${API_KEY}`
+                        }
+                    });
+                    
+                    if (!statusResponse.ok) {
+                        const status = statusResponse.status;
+                        
+                        // Handle polling errors
+                        if (status === 500 || status === 502 || status === 503 || status === 504) {
+                            pollingErrors++;
+                            if (pollingErrors > MAX_POLLING_ERRORS) {
+                                throw new Error(`Too many polling errors (${pollingErrors}) for job ${jobId}`);
+                            }
+                            console.warn(`Polling error ${status} for job ${jobId}, continuing... (${pollingErrors}/${MAX_POLLING_ERRORS})`);
+                        }
+                        
+                        await sleep(POLLING_INTERVAL_MS);
+                        continue;
+                    }
+                    
+                    // Reset polling error counter on successful response
+                    pollingErrors = 0;
+                    
+                    const statusResult = await statusResponse.json();
+                    
+                    if (statusResult.status === 'completed') {
+                        jobComplete = true;
+                        extractionResults = statusResult;
+                        break;
+                    } else if (statusResult.status === 'failed') {
+                        const errorMessage = statusResult.error || 'Unknown error';
+                        
+                        // Check if this is a retryable failure
+                        if (errorMessage.includes('500') || errorMessage.includes('timeout') || errorMessage.includes('server error')) {
+                            if (retryAttempt < MAX_RETRIES) {
+                                console.warn(`Job failed with retryable error for ${url}: ${errorMessage}, retrying...`);
+                                break; // Break out of polling loop to retry the entire job
+                            }
+                        }
+                        
+                        throw new Error('Job failed: ' + errorMessage);
+                    } else {
+                        await sleep(POLLING_INTERVAL_MS);
+                    }
+                } catch (networkError) {
+                    pollingErrors++;
+                    if (pollingErrors > MAX_POLLING_ERRORS) {
+                        throw new Error(`Too many network errors during polling: ${networkError.message}`);
+                    }
+                    console.error(`Network error during polling (${pollingErrors}/${MAX_POLLING_ERRORS}):`, networkError);
+                    await sleep(POLLING_INTERVAL_MS);
+                    continue;
+                }
+            }
+            
+            if (!jobComplete) {
+                if (retryAttempt < MAX_RETRIES) {
+                    console.warn(`Job polling timeout for ${url}, retrying entire request...`);
+                    continue; // Retry the entire request
+                } else {
+                    throw new Error(`Job did not complete after ${MAX_POLLING_ATTEMPTS} polling attempts and ${MAX_RETRIES + 1} retries`);
+                }
+            }
+            
+            // Get the extracted data
+            if (extractionResults && extractionResults.data) {
+                console.log(`Successfully enriched data for ${url} ${retryAttempt > 0 ? `after ${retryAttempt} retries` : ''}`);
+                return extractionResults.data;
+            } else {
+                return {};
+            }
+            
+        } catch (error) {
+            // Log the error for this attempt
+            console.error(`Attempt ${retryAttempt + 1}/${MAX_RETRIES + 1} failed for ${url}:`, error.message);
+            
+            // If this was the last attempt, throw the error
+            if (retryAttempt === MAX_RETRIES) {
+                throw new Error(`Failed after ${MAX_RETRIES + 1} attempts: ${error.message}`);
+            }
+            
+            // Wait before retrying (unless it's a network error during job submission)
+            if (retryAttempt < MAX_RETRIES) {
+                const delay = RETRY_DELAYS[retryAttempt];
+                console.log(`Waiting ${delay}ms before retry...`);
+                await sleep(delay);
+            }
+        }
+    }
+}
+
+// Extract enrichment data from text only (no URL crawling)
+async function extractEnrichmentDataFromText(prompt, rowContext) {
+    console.log(`Enriching data from text context: ${rowContext}`);
+    
+    // For text-only enrichment, we'll create placeholder data
+    const fields = parseEnrichmentFields(prompt);
+    const enrichmentData = {};
+    
+    // Simple text-based enrichment (placeholder implementation)
+    fields.forEach(field => {
+        if (field.includes('merchandise') || field.includes('product')) {
+            // Try to infer merchandise from business name
+            if (rowContext.toLowerCase().includes('restaurant') || rowContext.toLowerCase().includes('food')) {
+                enrichmentData[field] = 'Food & Dining';
+            } else if (rowContext.toLowerCase().includes('retail') || rowContext.toLowerCase().includes('store')) {
+                enrichmentData[field] = 'Retail Goods';
+            } else {
+                enrichmentData[field] = 'General Services';
+            }
+        } else {
+            enrichmentData[field] = 'Not available (text-only enrichment)';
+        }
+    });
+    
+    return enrichmentData;
+}
+
+// Parse enrichment fields from the prompt with improved extraction for complex prompts
+function parseEnrichmentFields(prompt) {
+    // Look for field names in the prompt
+    const fields = [];
+    
+    console.log(`Parsing enrichment fields from prompt: "${prompt}"`);
+    
+    // Clean the prompt first to remove HTML tags and normalize
+    const cleanPrompt = prompt
+        .replace(/<[^>]*>/g, ' ') // Remove HTML tags
+        .replace(/\/n\//g, ' ') // Remove /n/ sequences
+        .replace(/\s+/g, ' ') // Normalize whitespace
+        .trim();
+    
+    console.log(`Cleaned prompt: "${cleanPrompt}"`);
+    
+    // Enhanced patterns specifically designed for your prompt structure
+    const patterns = [
+        // Pattern 1: "Add/Also add a/the [field name]:" - handles your exact format
+        /(?:add|also\s+add)\s+(?:a|the)\s+([^:]+?):/gi,
+        
+        // Pattern 2: "quoted phrases" 
+        /"([^"]+)"/g,
+        
+        // Pattern 3: add/create a "field" column or add/create a field column
+        /(?:add|create)\s+a\s+['"]?([^'"<:]+?)['"]?\s*(?:column|field)?/gi,
+        
+        // Pattern 4: add/create the [field]
+        /(?:add|create)\s+the\s+([^<:]+?)(?:\s|$|e\.g)/gi,
+        
+        // Pattern 5: "field" column patterns
+        /['"]([^'"]+?)['"]?\s+column/gi,
+        
+        // Pattern 6: simple word patterns (fallback)
+        /\b(\w+)\s+column/gi,
+        /\b(\w+)\s+field/gi
+    ];
+    
+    // Track found fields to avoid duplicates
+    const foundFields = new Set();
+    
+    // Try each pattern
+    patterns.forEach((pattern, patternIndex) => {
+        console.log(`Trying pattern ${patternIndex + 1}: ${pattern}`);
+        let match;
+        const regex = new RegExp(pattern.source, pattern.flags);
+        
+        while ((match = regex.exec(cleanPrompt)) !== null) {
+            let fieldText = match[1];
+            if (fieldText) {
+                fieldText = fieldText.trim();
+                console.log(`Pattern ${patternIndex + 1} found raw: "${fieldText}"`);
+                
+                // Clean up the field text more aggressively
+                let cleanField = fieldText
+                    .toLowerCase()
+                    .trim()
+                    // Remove common words that aren't part of the field name
+                    .replace(/^(a|an|the|new)\s+/gi, '')
+                    .replace(/\s+(column|field)$/gi, '')
+                    .replace(/\s*under\s*.*$/gi, '') // Remove "under" and everything after
+                    .replace(/\s*e\.g\s*.*$/gi, '') // Remove "e.g" and everything after
+                    .trim();
+                
+                // Convert to valid field name (replace spaces and special chars with underscores)
+                const fieldName = cleanField.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+                
+                if (fieldName && fieldName.length > 1 && !foundFields.has(fieldName)) {
+                    foundFields.add(fieldName);
+                    fields.push(fieldName);
+                    console.log(`Added field: "${fieldName}" (from "${fieldText}" -> "${cleanField}")`);
+                }
+            }
+        }
+    });
+    
+    // Additional logic to extract fields from specific contexts
+    // Look for examples that might indicate field types
+    const examplePattern = /e\.g[.,:]?\s*([^/]+?)(?:\/n\/|$)/gi;
+    let exampleMatch;
+    while ((exampleMatch = examplePattern.exec(cleanPrompt)) !== null) {
+        const exampleText = exampleMatch[1].trim();
+        console.log(`Found example text: "${exampleText}"`);
+        
+        // If the example looks like a URL, it's probably a website field
+        if (exampleText.match(/https?:\/\/|www\./)) {
+            const websiteField = 'website';
+            if (!foundFields.has(websiteField) && !foundFields.has('business_website')) {
+                foundFields.add('business_website');
+                fields.push('business_website');
+                console.log(`Added business_website field based on URL example: "${exampleText}"`);
+            }
+        }
+        
+        // If the example looks like hours, it's probably hours
+        if (exampleText.match(/\d+-\d+|tu-f|sa|by\s+appt/i)) {
+            const hoursField = 'shop_hours';
+            if (!foundFields.has(hoursField) && !foundFields.has('hours')) {
+                foundFields.add('shop_hours');
+                fields.push('shop_hours');
+                console.log(`Added shop_hours field based on hours example: "${exampleText}"`);
+            }
+        }
+    }
+    
+    // Manual extraction for common field patterns that might be missed
+    const manualPatterns = [
+        { keywords: ['business website', 'website'], field: 'business_website' },
+        { keywords: ['shop hours', 'hours', 'schedule', 'time'], field: 'shop_hours' },
+        { keywords: ['phone', 'telephone', 'number'], field: 'phone' },
+        { keywords: ['address', 'location'], field: 'address' },
+        { keywords: ['email', 'contact'], field: 'email' }
+    ];
+    
+    manualPatterns.forEach(({ keywords, field }) => {
+        const hasKeyword = keywords.some(keyword => 
+            cleanPrompt.toLowerCase().includes(keyword) && !foundFields.has(field)
+        );
+        
+        if (hasKeyword) {
+            foundFields.add(field);
+            fields.push(field);
+            console.log(`Added field via manual pattern: "${field}"`);
+        }
+    });
+    
+    // Remove duplicates and clean up
+    const uniqueFields = [...new Set(fields)].filter(field => field && field.length > 0);
+    
+    console.log(`Final extracted fields: [${uniqueFields.join(', ')}]`);
+    
+    // If no fields found, default to 'enrichment'
+    if (uniqueFields.length === 0) {
+        console.log('No fields found, defaulting to "enrichment"');
+        uniqueFields.push('enrichment');
+    }
+    
+    return uniqueFields;
+}
+
+// Add an enrichment result to the table
+function addEnrichmentResult(result) {
+    enrichmentResults.push(result);
+    
+    // Create or update table headers based on the original CSV + new enrichment columns
+    updateEnrichmentResultsTableHeaders(result);
+    
+    // Add a row to the table
+    const row = document.createElement('tr');
+    
+    // Get all headers (original + enrichment + status)
+    const headers = getEnrichmentTableHeaders();
+    
+    headers.forEach(header => {
+        const cell = document.createElement('td');
+        
+        if (header === 'Status') {
+            if (result.status === 'success') {
+                cell.textContent = 'Success';
+                cell.classList.add('text-success');
+            } else {
+                cell.textContent = 'Error';
+                cell.classList.add('text-danger');
+            }
+        } else if (header === 'Error') {
+            cell.textContent = result.error || '';
+            if (result.error) {
+                cell.classList.add('text-danger');
+            }
+        } else if (result.enrichment_data && result.enrichment_data.hasOwnProperty(header)) {
+            // This is an enrichment column
+            const value = result.enrichment_data[header];
+            cell.textContent = value !== undefined && value !== null ? value.toString() : '-';
+        } else if (result.hasOwnProperty(header)) {
+            // This is an original CSV column
+            cell.textContent = result[header] || '-';
+        } else {
+            cell.textContent = '-';
+        }
+        
+        row.appendChild(cell);
+    });
+    
+    enrichmentResultsTableBody.appendChild(row);
+}
+
+// Update the enrichment results table headers
+function updateEnrichmentResultsTableHeaders(result) {
+    // Always regenerate headers to account for new enrichment fields
+    const headers = getEnrichmentTableHeaders();
+    
+    const headerRow = document.createElement('tr');
+    headers.forEach(header => {
+        const th = document.createElement('th');
+        th.textContent = header;
+        headerRow.appendChild(th);
+    });
+    
+    enrichmentResultsTableHead.innerHTML = '';
+    enrichmentResultsTableHead.appendChild(headerRow);
+    
+    // Update existing rows to match new header structure
+    updateExistingEnrichmentRows(headers);
+}
+
+// Get enrichment table headers (original CSV columns + enrichment columns + status columns)
+function getEnrichmentTableHeaders() {
+    let headers = [...enrichmentCsvHeaders];
+    
+    // Get all unique enrichment fields from actual results
+    const enrichmentFields = new Set();
+    enrichmentResults.forEach(result => {
+        if (result.enrichment_data && typeof result.enrichment_data === 'object') {
+            Object.keys(result.enrichment_data).forEach(key => {
+                enrichmentFields.add(key);
+            });
+        }
+    });
+    
+    // Add enrichment fields to headers
+    headers = headers.concat(Array.from(enrichmentFields));
+    
+    headers.push('Status', 'Error');
+    return headers;
+}
+
+// Download enrichment results as a CSV file
+function downloadEnrichmentResults() {
+    if (enrichmentResults.length === 0) {
+        alert('No results to download.');
+        return;
+    }
+    
+    const headers = getEnrichmentTableHeaders();
+    let csvContent = headers.join(',') + '\n';
+    
+    enrichmentResults.forEach(result => {
+        const row = headers.map(header => {
+            let value = '';
+            
+            if (header === 'Status') {
+                value = result.status === 'success' ? 'Success' : 'Error';
+            } else if (header === 'Error') {
+                value = result.error || '';
+            } else if (result.enrichment_data && result.enrichment_data.hasOwnProperty(header)) {
+                const enrichmentValue = result.enrichment_data[header];
+                value = enrichmentValue !== undefined && enrichmentValue !== null ? enrichmentValue.toString() : '';
+            } else if (result.hasOwnProperty(header)) {
+                value = result[header] || '';
+            }
+            
+            return `"${value.toString().replace(/"/g, '""')}"`;
+        });
+        
+        csvContent += row.join(',') + '\n';
+    });
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'enriched_data.csv');
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+// Start enrichment progress tracking
+function startEnrichmentProgressTracking(totalRows) {
+    enrichmentStartTime = Date.now();
+    totalEnrichmentToProcess = totalRows;
+    processedEnrichmentCount = 0;
+    enrichmentProcessingTimes = [];
+    
+    enrichmentGlobalProgressBar.style.width = '0%';
+    enrichmentGlobalProgressPercentage.textContent = '0%';
+    enrichmentGlobalStatusStats.textContent = `Processing 0 of ${totalRows} rows`;
+    enrichmentElapsedTime.textContent = 'Elapsed: 0s';
+    enrichmentEstimatedTime.textContent = 'Est. remaining: --';
+    
+    if (enrichmentProgressTimer) {
+        clearInterval(enrichmentProgressTimer);
+    }
+    
+    enrichmentProgressTimer = setInterval(() => {
+        if (!enrichmentStartTime) return;
+        
+        const elapsed = Date.now() - enrichmentStartTime;
+        enrichmentElapsedTime.textContent = `Elapsed: ${formatTime(elapsed)}`;
+        
+        if (processedEnrichmentCount > 0 && enrichmentProcessingTimes.length > 0) {
+            const avgTimePerRow = enrichmentProcessingTimes.reduce((a, b) => a + b, 0) / enrichmentProcessingTimes.length;
+            const remainingRows = totalEnrichmentToProcess - processedEnrichmentCount;
+            const estimatedRemainingTime = avgTimePerRow * remainingRows;
+            
+            enrichmentEstimatedTime.textContent = `Est. remaining: ${formatTime(estimatedRemainingTime)}`;
+        }
+    }, 1000);
+}
+
+// Update enrichment progress when a row is processed
+function updateEnrichmentProgress(success = true, processingTime = null) {
+    if (!enrichmentStartTime) return;
+    
+    processedEnrichmentCount++;
+    
+    if (processingTime) {
+        enrichmentProcessingTimes.push(processingTime);
+    }
+    
+    const progressPercent = Math.round((processedEnrichmentCount / totalEnrichmentToProcess) * 100);
+    enrichmentGlobalProgressBar.style.width = `${progressPercent}%`;
+    enrichmentGlobalProgressPercentage.textContent = `${progressPercent}%`;
+    
+    enrichmentGlobalStatusStats.textContent = `Processing ${processedEnrichmentCount} of ${totalEnrichmentToProcess} rows`;
+    
+    if (processedEnrichmentCount >= totalEnrichmentToProcess) {
+        finishEnrichmentProgress();
+    }
+}
+
+// End enrichment progress tracking
+function finishEnrichmentProgress() {
+    if (enrichmentProgressTimer) {
+        clearInterval(enrichmentProgressTimer);
+        enrichmentProgressTimer = null;
+    }
+    
+    if (enrichmentStartTime) {
+        const totalTime = Date.now() - enrichmentStartTime;
+        enrichmentElapsedTime.textContent = `Total time: ${formatTime(totalTime)}`;
+        enrichmentEstimatedTime.textContent = `Avg. per row: ${formatTime(totalTime / totalEnrichmentToProcess)}`;
+        
+        const successCount = enrichmentResults.filter(r => r.status === 'success').length;
+        const successRate = Math.round((successCount / totalEnrichmentToProcess) * 100);
+        enrichmentGlobalStatusStats.textContent = `Completed: ${successCount} of ${totalEnrichmentToProcess} rows (${successRate}% success)`;
+    }
+    
+    enrichmentStartTime = null;
+}
+
+// Update existing enrichment rows to match new header structure
+function updateExistingEnrichmentRows(headers) {
+    // Get all existing rows
+    const existingRows = Array.from(enrichmentResultsTableBody.children);
+    
+    existingRows.forEach((row, rowIndex) => {
+        const result = enrichmentResults[rowIndex];
+        if (!result) return;
+        
+        // Clear the row and rebuild it with the new header structure
+        row.innerHTML = '';
+        
+        headers.forEach(header => {
+            const cell = document.createElement('td');
+            
+            if (header === 'Status') {
+                if (result.status === 'success') {
+                    cell.textContent = 'Success';
+                    cell.classList.add('text-success');
+                } else {
+                    cell.textContent = 'Error';
+                    cell.classList.add('text-danger');
+                }
+            } else if (header === 'Error') {
+                cell.textContent = result.error || '';
+                if (result.error) {
+                    cell.classList.add('text-danger');
+                }
+            } else if (result.enrichment_data && result.enrichment_data.hasOwnProperty(header)) {
+                // This is an enrichment column
+                const value = result.enrichment_data[header];
+                cell.textContent = value !== undefined && value !== null ? value.toString() : '-';
+            } else if (result.hasOwnProperty(header)) {
+                // This is an original CSV column
+                cell.textContent = result[header] || '-';
+            } else {
+                cell.textContent = '-';
+            }
+            
+            row.appendChild(cell);
+        });
+    });
 }
 
 // Initialize the results table with all ZIP codes
@@ -601,6 +1315,281 @@ function downloadResults() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+}
+
+// Handle CSV file upload for enrichment
+function handleEnrichmentCSVUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    // Use PapaParse to parse the CSV
+    Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+            enrichmentCsvHeaders = results.meta.fields;
+            enrichmentCsvData = results.data;
+            
+            console.log(`Loaded CSV with ${enrichmentCsvData.length} rows and ${enrichmentCsvHeaders.length} columns`);
+            
+            // Preview the CSV data
+            createEnrichmentCSVPreview(enrichmentCsvData, enrichmentCsvHeaders);
+            
+            // Set up URL column selection
+            setupUrlColumnSelection(enrichmentCsvHeaders);
+            
+            // Show the enrichment prompt section
+            enrichmentPromptSection.classList.remove('d-none');
+            enrichmentControls.classList.remove('d-none');
+        },
+        error: function(error) {
+            console.error('Error parsing CSV:', error);
+            alert('Error parsing CSV file. Please check the file format.');
+        }
+    });
+}
+
+// Create a preview of the CSV data for enrichment
+function createEnrichmentCSVPreview(data, headers) {
+    // Clear previous preview
+    enrichmentCsvPreviewTable.innerHTML = '';
+    
+    // Create header row
+    const headerRow = document.createElement('tr');
+    headers.forEach(header => {
+        const th = document.createElement('th');
+        th.textContent = header;
+        headerRow.appendChild(th);
+    });
+    
+    const thead = document.createElement('thead');
+    thead.appendChild(headerRow);
+    enrichmentCsvPreviewTable.appendChild(thead);
+    
+    // Create data rows (limit to 5 for preview)
+    const tbody = document.createElement('tbody');
+    data.slice(0, 5).forEach(row => {
+        const tr = document.createElement('tr');
+        headers.forEach(header => {
+            const td = document.createElement('td');
+            td.textContent = row[header] || '';
+            tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+    });
+    
+    enrichmentCsvPreviewTable.appendChild(tbody);
+    enrichmentCsvPreview.classList.remove('d-none');
+}
+
+// Set up URL column selection
+function setupUrlColumnSelection(headers) {
+    // Clear existing options
+    enrichmentUrlColumnSelect.innerHTML = '<option value="">No URL column (text-only enrichment)</option>';
+    
+    // Add each column as an option
+    headers.forEach(header => {
+        const option = document.createElement('option');
+        option.value = header;
+        option.textContent = header;
+        enrichmentUrlColumnSelect.appendChild(option);
+    });
+    
+    // Try to auto-detect URL column
+    const urlColumn = findUrlColumn(headers);
+    if (urlColumn) {
+        enrichmentUrlColumnSelect.value = urlColumn;
+        selectedUrlColumn = urlColumn;
+    }
+    
+    // Add event listener for manual selection
+    enrichmentUrlColumnSelect.addEventListener('change', function() {
+        selectedUrlColumn = this.value;
+    });
+    
+    // Show the URL column section
+    enrichmentUrlColumnSection.classList.remove('d-none');
+}
+
+// Find the URL column in the CSV
+function findUrlColumn(headers) {
+    const possibleNames = ['url', 'website', 'link', 'homepage', 'site', 'web'];
+    
+    for (const header of headers) {
+        if (possibleNames.includes(header.toLowerCase())) {
+            return header;
+        }
+    }
+    
+    // If no exact match, look for partial matches
+    for (const header of headers) {
+        for (const name of possibleNames) {
+            if (header.toLowerCase().includes(name)) {
+                return header;
+            }
+        }
+    }
+    
+    return null;
+}
+
+// Process CSV enrichment with concurrent processing
+async function processEnrichment() {
+    // Get enrichment prompt
+    const enrichmentPrompt = enrichmentPromptInput.value.trim();
+    
+    if (!enrichmentPrompt) {
+        alert('Please enter enrichment instructions.');
+        return;
+    }
+    
+    if (enrichmentCsvData.length === 0) {
+        alert('No CSV data loaded. Please upload a CSV file first.');
+        return;
+    }
+    
+    // Show the results section
+    enrichmentResultsSection.classList.remove('d-none');
+    
+    // Clear previous results
+    enrichmentResults = [];
+    enrichmentResultsTableBody.innerHTML = '';
+    enrichmentProgressBar.style.width = '0%';
+    enrichmentProgressBar.classList.add('progress-bar-animated');
+    enrichmentStatus.textContent = 'Preparing enrichment...';
+    enrichmentCurrentProgressPercentage.textContent = '0%';
+    
+    // Reset global variables
+    enrichmentComplete = false;
+    
+    // Show loading UI with enrichment message
+    if (loadingMessage) {
+        loadingMessage.textContent = 'Enriching CSV data...';
+    }
+    loadingOverlay.classList.remove('d-none');
+    
+    // Start enrichment progress tracking
+    startEnrichmentProgressTracking(enrichmentCsvData.length);
+    
+    try {
+        // Process with concurrency (3 concurrent jobs)
+        const MAX_CONCURRENT_JOBS = 3;
+        enrichmentStatus.textContent = `Processing with ${MAX_CONCURRENT_JOBS} concurrent browsers...`;
+        
+        // Create a queue of rows to process
+        const rowQueue = [...enrichmentCsvData.map((row, index) => ({ row, index }))];
+        
+        // Create a pool to track active jobs
+        const activeJobs = [];
+        const processedIndexes = new Set();
+        
+        // Define function to update status with current active jobs
+        const updateConcurrentJobsStatus = () => {
+            if (activeJobs.length === 0) return;
+            
+            const activeJobText = activeJobs
+                .slice(0, 3)
+                .map(job => `#${job.index}`)
+                .join(', ');
+                
+            const additionalJobsText = activeJobs.length > 3 ? ` and ${activeJobs.length - 3} more` : '';
+            enrichmentStatus.textContent = `Enriching rows ${activeJobText}${additionalJobsText} concurrently (${processedIndexes.size} of ${enrichmentCsvData.length} total)`;
+        };
+        
+        // Process the queue concurrently
+        while (rowQueue.length > 0 || activeJobs.length > 0) {
+            // Fill the active jobs pool up to MAX_CONCURRENT_JOBS
+            while (activeJobs.length < MAX_CONCURRENT_JOBS && rowQueue.length > 0) {
+                const { row, index } = rowQueue.shift();
+                
+                if (!processedIndexes.has(index)) {
+                    processedIndexes.add(index);
+                    
+                    // Create a job for this row
+                    const rowStartTime = Date.now();
+                    const rowIndex = index + 1;
+                    
+                    // Update status
+                    updateConcurrentJobsStatus();
+                    
+                    // Create a promise for this job
+                    const jobPromise = (async () => {
+                        try {
+                            await processSingleEnrichmentRow(row, enrichmentPrompt, rowIndex, enrichmentCsvData.length);
+                            updateEnrichmentProgress(true, Date.now() - rowStartTime);
+                            return { row, success: true, time: Date.now() - rowStartTime };
+                        } catch (error) {
+                            console.error(`Error enriching row ${rowIndex}:`, error);
+                            
+                            // Add error result to the table
+                            addEnrichmentResult({
+                                ...row,
+                                enrichment_data: {},
+                                error: error.message,
+                                status: 'error'
+                            });
+                            
+                            updateEnrichmentProgress(false, Date.now() - rowStartTime);
+                            return { row, success: false, error, time: Date.now() - rowStartTime };
+                        }
+                    })();
+                    
+                    // Add this job to the active jobs pool
+                    activeJobs.push({ 
+                        promise: jobPromise, 
+                        row, 
+                        index: rowIndex,
+                        startTime: rowStartTime 
+                    });
+                }
+            }
+            
+            // If we have active jobs, wait for at least one to complete
+            if (activeJobs.length > 0) {
+                // Create an array of promises that resolve when jobs complete
+                const promises = activeJobs.map(job => job.promise);
+                
+                // Wait for at least one job to complete
+                await Promise.race(promises);
+                
+                // Remove completed jobs from active pool
+                const stillRunning = [];
+                
+                // Check each job to see if it's still running
+                for (const job of activeJobs) {
+                    const isResolved = await Promise.race([
+                        job.promise.then(() => true, () => true),
+                        new Promise(resolve => setTimeout(() => resolve(false), 0))
+                    ]);
+                    
+                    if (!isResolved) {
+                        stillRunning.push(job);
+                    }
+                }
+                
+                // Update active jobs to only include those still running
+                activeJobs.length = 0;
+                activeJobs.push(...stillRunning);
+                
+                // Update status with current jobs
+                updateConcurrentJobsStatus();
+            }
+        }
+        
+        // Processing complete
+        enrichmentComplete = true;
+        enrichmentProgressBar.style.width = '100%';
+        enrichmentProgressBar.classList.remove('progress-bar-animated');
+        enrichmentStatus.textContent = `Enrichment complete. ${enrichmentResults.filter(r => r.status === 'success').length} of ${enrichmentCsvData.length} rows processed successfully.`;
+        enrichmentCurrentProgressPercentage.textContent = '100%';
+        
+    } catch (error) {
+        console.error('Error in enrichment processing:', error);
+        enrichmentStatus.textContent = `Error: ${error.message}`;
+        enrichmentStatus.classList.add('text-danger');
+    } finally {
+        loadingOverlay.classList.add('d-none');
+    }
 }
 
 // Format time in a readable format

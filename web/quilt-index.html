@@ -46,6 +46,9 @@
                             <li class="nav-item">
                                 <a class="nav-link" id="kb-scrape-tab" data-bs-toggle="tab" href="#kb-scrape" role="tab">KB Scrape</a>
                             </li>
+                            <li class="nav-item">
+                                <a class="nav-link" id="enrichment-tab" data-bs-toggle="tab" href="#enrichment" role="tab">Enrichment</a>
+                            </li>
                         </ul>
                     </div>
                     <div class="card-body">
@@ -516,6 +519,104 @@ Navigate through the product listings by clicking the 'Next Page' button until d
                                                 <!-- Headers will be dynamically generated based on extraction results -->
                                             </thead>
                                             <tbody id="bulkResultsTableBody">
+                                                <!-- Results will be inserted here -->
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Enrichment Tab -->
+                            <div class="tab-pane fade" id="enrichment" role="tabpanel">
+                                <div class="alert alert-info mb-3">
+                                    <strong>CSV Enrichment Tool</strong> - Upload a CSV file and enrich it with new columns based on existing data and URLs.
+                                </div>
+                                
+                                <p>Upload a CSV file to enrich with additional data:</p>
+                                <div class="mb-3">
+                                    <input class="form-control" type="file" id="enrichmentCsvFileInput" accept=".csv">
+                                    <div class="form-text mt-1">
+                                        The CSV should contain at least one URL column for best results.
+                                    </div>
+                                </div>
+                                
+                                <!-- CSV Preview for Enrichment -->
+                                <div id="enrichmentCsvPreview" class="mt-3 d-none">
+                                    <p><strong>CSV Preview:</strong></p>
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-bordered" id="enrichmentCsvPreviewTable">
+                                            <!-- CSV preview content will be inserted here -->
+                                        </table>
+                                    </div>
+                                </div>
+                                
+                                <!-- URL Column Selection -->
+                                <div id="enrichmentUrlColumnSection" class="mb-3 d-none">
+                                    <label for="enrichmentUrlColumnSelect" class="form-label">Select URL Column:</label>
+                                    <select class="form-select" id="enrichmentUrlColumnSelect">
+                                        <option value="">No URL column (text-only enrichment)</option>
+                                    </select>
+                                    <div class="form-text">
+                                        Choose which column contains URLs to crawl for enrichment data.
+                                    </div>
+                                </div>
+                                
+                                <!-- Enrichment Prompt -->
+                                <div id="enrichmentPromptSection" class="mb-3 d-none">
+                                    <label for="enrichmentPromptInput" class="form-label">Enrichment Instructions:</label>
+                                    <textarea class="form-control" id="enrichmentPromptInput" rows="4" placeholder="Example:
+Add a 'merchandise' column that describes what products or services this business offers based on the provided information and website content."></textarea>
+                                    <div class="form-text">
+                                        Describe what new information you want to add. The system will use existing row data and website content (if URL provided) to generate the new column(s).
+                                    </div>
+                                </div>
+                                
+                                <div id="enrichmentControls" class="mb-3 d-none">
+                                    <button id="processEnrichmentButton" class="btn btn-primary">Enrich CSV</button>
+                                </div>
+                                
+                                <!-- Enrichment Results Section -->
+                                <div id="enrichmentResultsSection" class="d-none mt-4">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h6 class="mb-0">Enriched Data</h6>
+                                        <button id="downloadEnrichmentResultsButton" class="btn btn-success btn-sm">Download Enriched CSV</button>
+                                    </div>
+                                    
+                                    <!-- Global Enrichment Progress -->
+                                    <div class="bg-light p-3 rounded border mb-3">
+                                        <div class="d-flex justify-content-between mb-1">
+                                            <span id="enrichmentGlobalProgressText">Overall Progress</span>
+                                            <span id="enrichmentGlobalProgressPercentage">0%</span>
+                                        </div>
+                                        <div class="progress mb-2" style="height: 10px;">
+                                            <div id="enrichmentGlobalProgressBar" class="progress-bar bg-primary" role="progressbar" style="width: 0%"></div>
+                                        </div>
+                                        <div class="d-flex justify-content-between small text-muted">
+                                            <div id="enrichmentGlobalStatusStats">Processing 0 of 0 rows</div>
+                                            <div id="enrichmentGlobalTimeStats">
+                                                <span id="enrichmentElapsedTime">Elapsed: 0s</span> | 
+                                                <span id="enrichmentEstimatedTime">Est. remaining: --</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Current Row Progress -->
+                                    <div class="mb-3">
+                                        <div class="d-flex justify-content-between mb-1">
+                                            <span>Current Row Progress</span>
+                                            <span id="enrichmentCurrentProgressPercentage">0%</span>
+                                        </div>
+                                        <div class="progress mb-2">
+                                            <div id="enrichmentProgressBar" class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                        </div>
+                                        <div id="enrichmentStatus"></div>
+                                    </div>
+                                    <div class="table-responsive mt-3">
+                                        <table class="table table-striped table-hover" id="enrichmentResultsTable">
+                                            <thead id="enrichmentResultsTableHead">
+                                                <!-- Headers will be dynamically generated based on original CSV + new columns -->
+                                            </thead>
+                                            <tbody id="enrichmentResultsTableBody">
                                                 <!-- Results will be inserted here -->
                                             </tbody>
                                         </table>
